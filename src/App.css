@@ -687,6 +687,10 @@ tbody tr:hover td {
   background: color-mix(in oklch, var(--panel), var(--bg) 25%);
 }
 
+.ai .rec {
+  width: 100%;
+}
+
 .empty {
   display: grid;
   gap: 10px;
