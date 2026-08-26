@@ -215,25 +215,36 @@ function Dashboard({ session }: { session: Session }) {
             <button key={item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{tabName(item)}</button>
           ))}
         </nav>
-        <section className="workspace">
-          <aside className="side">
-            <h2>直播场次</h2>
-            {metrics.map((live) => (
-              <button key={live.id} className={selected?.id === live.id ? 'live active' : 'live'} onClick={() => setSelectedId(live.id)}>
-                <b>{live.topic}</b><span>{formatNumber(live.viewers)} 人观看 · {formatSeconds(live.avgWatchSec)} · {formatMoney(live.gmv)}</span>
-              </button>
-            ))}
-          </aside>
-          <div className="content">
-            {tab === 'overview' && <Overview metrics={metrics} review={overviewReview} isAdmin={isAdmin} busy={busy === 'overview'} onAi={() => void generateReview('overview')} />}
-            {tab === 'compare' && <Compare metrics={metrics} />}
-            {tab === 'detail' && selectedMetrics && <Detail live={selectedMetrics} review={detailReview || undefined} isAdmin={isAdmin} busy={busy === 'single'} onAi={() => void generateReview('single')} />}
-            {tab === 'profile' && selected && <Profile live={selected} profile={currentProfile || null} files={profileFiles} isAdmin={isAdmin} busy={busy === 'profile'} onFiles={readProfileFiles} onExtract={() => void extractProfile()} />}
-            {tab === 'data' && <DataTable metrics={metrics} isAdmin={isAdmin} busy={busy === 'legacy'} legacyText={legacyText} onLegacyText={setLegacyText} onImportLegacy={importLegacySource} />}
-          </div>
-        </section>
+        {tab === 'overview' ? (
+          <section className="content content-full">
+            <Overview metrics={metrics} review={overviewReview} isAdmin={isAdmin} busy={busy === 'overview'} onAi={() => void generateReview('overview')} />
+          </section>
+        ) : (
+          <section className="workspace">
+            <LiveSide metrics={metrics} selectedId={selected?.id || ''} onSelect={setSelectedId} />
+            <div className="content">
+              {tab === 'compare' && <Compare metrics={metrics} />}
+              {tab === 'detail' && selectedMetrics && <Detail live={selectedMetrics} review={detailReview || undefined} isAdmin={isAdmin} busy={busy === 'single'} onAi={() => void generateReview('single')} />}
+              {tab === 'profile' && selected && <Profile live={selected} profile={currentProfile || null} files={profileFiles} isAdmin={isAdmin} busy={busy === 'profile'} onFiles={readProfileFiles} onExtract={() => void extractProfile()} />}
+              {tab === 'data' && <DataTable metrics={metrics} isAdmin={isAdmin} busy={busy === 'legacy'} legacyText={legacyText} onLegacyText={setLegacyText} onImportLegacy={importLegacySource} />}
+            </div>
+          </section>
+        )}
       </main>
     </div>
+  )
+}
+
+function LiveSide({ metrics, selectedId, onSelect }: { metrics: LiveMetrics[]; selectedId: string; onSelect: (id: string) => void }) {
+  return (
+    <aside className="side">
+      <h2>直播场次</h2>
+      {metrics.map((live) => (
+        <button key={live.id} className={selectedId === live.id ? 'live active' : 'live'} onClick={() => onSelect(live.id)}>
+          <b>{live.topic}</b><span>{formatNumber(live.viewers)} 人观看 · {formatSeconds(live.avgWatchSec)} · {formatMoney(live.gmv)}</span>
+        </button>
+      ))}
+    </aside>
   )
 }
 
@@ -245,12 +256,34 @@ function Summary({ metrics }: { metrics: LiveMetrics[] }) {
   const totalViewers = metrics.reduce((sum, live) => sum + live.viewers, 0)
   const totalFollows = metrics.reduce((sum, live) => sum + live.follows, 0)
   const totalGmv = metrics.reduce((sum, live) => sum + live.gmv, 0)
+  const bestTraffic = maxRow(metrics, 'viewers')
+  const bestRetention = maxRow(metrics, 'avgWatchSec')
+  const bestCommerce = maxRow(metrics, 'gmv')
+  const avgWatch = average(metrics, 'avgWatchSec')
+  const followRate = totalViewers ? totalFollows / totalViewers : 0
   return (
-    <section className="summary">
-      <Metric label="累计观看人数" value={formatNumber(totalViewers)} />
-      <Metric label="平均观看时长" value={formatSeconds(average(metrics, 'avgWatchSec'))} />
-      <Metric label="新增关注" value={formatNumber(totalFollows)} note={`关注率 ${formatPercent(totalViewers ? totalFollows / totalViewers : 0)}`} />
-      <Metric label="成交金额" value={formatMoney(totalGmv)} />
+    <section className="summary-grid">
+      <div className="panel panel-pad">
+        <div className="section-head">
+          <div>
+            <h2>整体复盘</h2>
+            <p>{periodLabel(metrics)}，共 {metrics.length} 场直播</p>
+          </div>
+        </div>
+        <div className="score">
+          <Metric label="累计观看人数" value={formatNumber(totalViewers)} note={bestTraffic ? `最高：${bestTraffic.topic}` : undefined} />
+          <Metric label="平均观看时长" value={formatSeconds(avgWatch)} note={bestRetention ? `最长：${bestRetention.topic}` : undefined} />
+          <Metric label="新增关注" value={formatNumber(totalFollows)} note={`整体关注率 ${formatPercent(followRate)}`} />
+          <Metric label="成交金额" value={formatMoney(totalGmv)} note={bestCommerce ? `最高：${bestCommerce.topic}` : undefined} />
+        </div>
+      </div>
+      <div className="panel panel-pad verdict">
+        <div className="grade">{ruleGrade(metrics)}</div>
+        <div>
+          <h2>{ruleVerdict(metrics).title}</h2>
+          <p>{ruleVerdict(metrics).body}</p>
+        </div>
+      </div>
     </section>
   )
 }
@@ -262,16 +295,76 @@ function Metric({ label, value, note }: { label: string; value: string; note?: s
 function Overview({ metrics, review, isAdmin, busy, onAi }: { metrics: LiveMetrics[]; review?: AiReview; isAdmin: boolean; busy: boolean; onAi: () => void }) {
   const bestTraffic = maxRow(metrics, 'viewers')
   const bestRetention = maxRow(metrics, 'avgWatchSec')
+  const bestEngagement = maxRow(metrics, 'engagementScore')
+  const bestFollow = maxRow(metrics, 'followRate')
   const bestCommerce = maxRow(metrics, 'gmv')
+  const lowFollowHighTraffic = metrics
+    .filter((row) => row.viewers >= average(metrics, 'viewers') && row.followRate < average(metrics, 'followRate'))
+    .sort((a, b) => b.viewers - a.viewers)[0]
   return (
     <div className="stack">
       <div className="insights">
-        <Insight tag="起量样本" title={bestTraffic?.topic || '暂无'} body={bestTraffic ? `观看人数 ${formatNumber(bestTraffic.viewers)}，适合拆解标题、嘉宾、预约和开播时间。` : ''} />
-        <Insight tag="内容粘性" title={bestRetention?.topic || '暂无'} body={bestRetention ? `平均观看 ${formatSeconds(bestRetention.avgWatchSec)}，说明这个主题更能让观众停下来听。` : ''} />
-        <Insight tag="成交结果" title={bestCommerce?.topic || '暂无'} body={bestCommerce ? `成交金额 ${formatMoney(bestCommerce.gmv)}，订单 ${formatNumber(bestCommerce.orders)}。` : ''} />
+        <Insight tone="good" tag="起量样本" title={bestTraffic ? `${bestTraffic.topic} 触达最强` : '暂无数据'} body={bestTraffic ? `观看人数 ${formatNumber(bestTraffic.viewers)}，适合拆解标题、嘉宾、预约和开播时间。` : '上传数据后生成。'} />
+        <Insight tone="info" tag="内容粘性" title={bestRetention ? `${bestRetention.topic} 留存最好` : '暂无数据'} body={bestRetention ? `平均观看 ${formatSeconds(bestRetention.avgWatchSec)}，说明这个主题更能让观众停下来听。` : '上传数据后生成。'} />
+        <Insight tone="good" tag="互动质量" title={bestEngagement ? `${bestEngagement.topic} 互动最强` : '暂无数据'} body={bestEngagement ? `评论率 ${formatPercent(bestEngagement.commentRate, 2)}，分享率 ${formatPercent(bestEngagement.shareRate, 1)}，可作为互动脚本参考。` : '上传数据后生成。'} />
+        <Insight tone="info" tag="关注沉淀" title={bestFollow ? `${bestFollow.topic} 关注转化最好` : '暂无数据'} body={bestFollow ? `新增关注 ${formatNumber(bestFollow.follows)}，关注率 ${formatPercent(bestFollow.followRate, 1)}。` : '上传数据后生成。'} />
+        <Insight tone={bestCommerce && bestCommerce.gmv > 0 ? 'good' : 'risk'} tag="成交结果" title={bestCommerce && bestCommerce.gmv > 0 ? `${bestCommerce.topic} 成交最高` : '成交信号偏弱'} body={bestCommerce && bestCommerce.gmv > 0 ? `成交金额 ${formatMoney(bestCommerce.gmv)}，订单 ${formatNumber(bestCommerce.orders)}，客单价 ${formatMoney(bestCommerce.avgOrderValue)}。` : '当前数据没有明显成交，需要补强商品露出和行动提示。'} />
+        <Insight tone={lowFollowHighTraffic ? 'risk' : 'info'} tag="待优化点" title={lowFollowHighTraffic ? `${lowFollowHighTraffic.topic} 流量高但沉淀弱` : '暂无明显高流量低沉淀场次'} body={lowFollowHighTraffic ? `观看 ${formatNumber(lowFollowHighTraffic.viewers)}，关注率仅 ${formatPercent(lowFollowHighTraffic.followRate, 1)}，需要在开场、中段和收尾加入关注理由。` : '继续观察后续场次，重点看流量是否能转为关注和成交。'} />
       </div>
+      <Recommendations metrics={metrics} />
       <AiPanel title="AI 总览复盘" review={review} isAdmin={isAdmin} busy={busy} generateLabel={review ? '重新生成总览 AI 分析' : '生成总览 AI 分析'} onAi={onAi} />
     </div>
+  )
+}
+
+function Recommendations({ metrics }: { metrics: LiveMetrics[] }) {
+  const avgWatch = average(metrics, 'avgWatchSec')
+  const avgFollow = average(metrics, 'followRate')
+  const avgConversion = average(metrics, 'buyerRate')
+  const bestRetention = maxRow(metrics, 'avgWatchSec')
+  const bestTraffic = maxRow(metrics, 'viewers')
+  const bestCommerce = maxRow(metrics, 'gmv')
+  const recs = [
+    {
+      title: '把高流量选题和高留存结构合并',
+      body: bestTraffic && bestRetention ? `用 ${bestTraffic.topic} 的触达方式做开场，用 ${bestRetention.topic} 的内容结构做中段，让流量不只进来，也能留下来。` : '先积累更多场次，再比较不同主题结构。',
+    },
+    avgWatch < 90 ? {
+      title: '前 3 分钟增加明确钩子',
+      body: '用本场会听到什么、适合谁、最后能得到什么来降低跳出，避免开场过长寒暄。',
+    } : {
+      title: '保留深度内容的节奏优势',
+      body: `当前平均观看 ${formatSeconds(avgWatch)}，说明深度内容有机会成立，下一步是让关键观点更早出现。`,
+    },
+    avgFollow < 0.02 ? {
+      title: '把关注理由写进直播流程',
+      body: '在开场、中段高互动后、收尾各提醒一次，理由要具体：后续曲目、嘉宾、幕后内容或资料更新。',
+    } : {
+      title: '放大关注表现好的话术',
+      body: `当前平均关注率 ${formatPercent(avgFollow, 1)}，建议复用表现最好场次里的关注承诺和提醒位置。`,
+    },
+    !bestCommerce || bestCommerce.gmv <= 0 || avgConversion < 0.002 ? {
+      title: '成交动作需要提前设计',
+      body: '商品或票务不要只在结尾出现，建议在内容高潮后插入一次自然转化，并用限时权益、曲目关联或嘉宾推荐承接。',
+    } : {
+      title: '复制成交最高场次的商品承接',
+      body: `${bestCommerce.topic} 已经证明有成交能力，建议复盘商品出现时机、口播方式和下单路径。`,
+    },
+    {
+      title: '后续每场补充运营备注',
+      body: '建议新增手工记录：预热渠道、嘉宾、主推商品、投流情况、直播脚本版本。只靠平台导出数据，很难解释波动原因。',
+    },
+  ]
+  return (
+    <section className="panel panel-pad">
+      <div className="section-head">
+        <div>
+          <h2>下一轮直播建议</h2>
+          <p>根据当前数据的强弱项自动生成</p>
+        </div>
+      </div>
+      <div className="recommendations">{recs.map((rec) => <div className="rec" key={rec.title}><div><b>{rec.title}</b><span>{rec.body}</span></div></div>)}</div>
+    </section>
   )
 }
 
@@ -393,8 +486,8 @@ function AiPanel({ title, review, isAdmin, busy, generateLabel, onAi }: { title:
   return <section className="panel"><div className="panel-head"><h2>{title}</h2>{isAdmin && <button className="button primary" disabled={busy} onClick={onAi}>{busy ? <RefreshCw size={16} /> : <Bot size={16} />}{busy ? '分析中' : generateLabel}</button>}</div>{review ? <div className="ai"><h3>{review.review.verdictTitle}</h3><p>{review.review.verdictText}</p>{review.review.insights?.map((item, index) => <Insight key={index} tag={item.tag || '复盘点'} title={item.title || ''} body={item.body || ''} />)}{review.review.recommendations?.map((item, index) => <div className="rec" key={index}><b>{item.title}</b><span>{item.body}</span></div>)}</div> : <div className="empty">还没有生成 AI 分析。</div>}</section>
 }
 
-function Insight({ tag, title, body }: { tag: string; title: string; body: string }) {
-  return <article className="insight"><small>{tag}</small><b>{title}</b><p>{body}</p></article>
+function Insight({ tag, title, body, tone = 'info' }: { tag: string; title: string; body: string; tone?: 'good' | 'risk' | 'info' }) {
+  return <article className="insight" data-tone={tone}><small>{tag}</small><h3>{title}</h3><p>{body}</p></article>
 }
 
 function Fact({ label, value }: { label: string; value: string }) {
@@ -402,3 +495,38 @@ function Fact({ label, value }: { label: string; value: string }) {
 }
 
 export default App
+
+function periodLabel(rows: LiveMetrics[]) {
+  const dates = rows.map((row) => {
+    const matched = row.startedAt.match(/(\d{4})年(\d{2})月(\d{2})日/)
+    return matched ? `${matched[2]}/${matched[3]}` : ''
+  }).filter(Boolean)
+  return dates.length ? `${dates[dates.length - 1]} 至 ${dates[0]}` : '当前数据'
+}
+
+function ruleGrade(rows: LiveMetrics[]) {
+  if (!rows.length) return 'C'
+  const avgWatch = average(rows, 'avgWatchSec')
+  const totalGmv = rows.reduce((sum, row) => sum + row.gmv, 0)
+  const avgFollow = average(rows, 'followRate')
+  if (avgWatch >= 120 && (totalGmv > 0 || avgFollow >= 0.025)) return 'A'
+  if (avgWatch >= 60 || totalGmv > 0 || avgFollow >= 0.015) return 'B'
+  return 'C'
+}
+
+function ruleVerdict(rows: LiveMetrics[]) {
+  const bestTraffic = maxRow(rows, 'viewers')
+  const bestRetention = maxRow(rows, 'avgWatchSec')
+  const bestCommerce = maxRow(rows, 'gmv')
+  if (!rows.length) return { title: '等待数据导入', body: '上传直播数据后，会先用规则模型生成整体判断。' }
+  if (bestCommerce && bestCommerce.gmv > 0) {
+    return {
+      title: '流量和转化存在明显分层',
+      body: `当前直播表现不是单纯流量问题，关键在于把 ${bestTraffic?.topic || '高流量场次'} 的选题吸引力、${bestRetention?.topic || '高留存场次'} 的停留结构和 ${bestCommerce.topic} 的成交动作串起来。`,
+    }
+  }
+  return {
+    title: '内容有触达，但成交链路偏弱',
+    body: `当前最高观看来自 ${bestTraffic?.topic || '部分场次'}，最高停留来自 ${bestRetention?.topic || '部分场次'}，下一步要补强关注沉淀和商品承接。`,
+  }
+}
