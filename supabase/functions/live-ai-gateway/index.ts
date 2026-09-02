@@ -111,12 +111,15 @@ function buildReviewPrompt(payload: Record<string, unknown>) {
       '只重点分析 selectedLive 这一场直播，可用 lives、totals、selectedProfile 做对照。',
       '输出这一场的表现判断、潜在可能原因、下一场可执行改善思路。',
       '潜在原因必须用“可能”表达，不能把没有记录的数据当作事实。',
+      '如果 selectedChannelProfile 不为空，insights 必须至少包含一条渠道相关分析，tag 使用“渠道分析”“渠道来源”或“预约转化”。',
+      '这条渠道分析必须引用 selectedChannelProfile 里的具体数字，例如曝光进房率、渠道进房占比、预约转观看率、成交金额中的至少两项。',
     ]
     : [
       '本次是复盘总览 AI 分析。',
       '分析所有直播的整体表现、场次趋势和结构性问题。',
       '输出未来直播的选题、排期、互动、关注沉淀和成交转化建议。',
       '如果样本量较少，需要提醒结论是阶段性判断。',
+      '如果 channelProfiles 不为空，必须比较已有关联渠道数据的场次，说明主要流量来源、预约渠道和成交承接差异。',
     ]
 
   return [
@@ -125,7 +128,7 @@ function buildReviewPrompt(payload: Record<string, unknown>) {
     '只输出 JSON，不要输出 Markdown。',
     '不要编造数据，结论必须点名具体直播场次并带关键数字。',
     '如果 audienceProfiles 或 selectedProfile 有数据，需要结合用户画像解释受众结构、消费力、地域和内容匹配度。',
-    '如果 channelProfiles 或 selectedChannelProfile 有数据，需要结合渠道来源、预约转观看、曝光进房漏斗和成交金额解释流量质量与转化问题。',
+    '如果 channelProfiles 或 selectedChannelProfile 有数据，不能忽略渠道数据，需要结合渠道来源、预约转观看、曝光进房漏斗和成交金额解释流量质量与转化问题。',
     'JSON 格式：',
     JSON.stringify({
       grade: 'A/B/C',

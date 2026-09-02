@@ -281,6 +281,7 @@ async function functionErrorMessage(response: Response | undefined, fallback: st
 
 export function compactPayload(rows: LiveRow[], profiles: AudienceProfile[], channelProfiles: ChannelProfile[], scope: 'overview' | 'single', selectedLive: LiveRow | null) {
   const metrics = rows.map(withMetrics)
+  const liveById = new Map(metrics.map((row) => [row.id, row]))
   const profileByLive = new Map(profiles.map((profile) => [profile.liveId, profile]))
   const channelProfileByLive = new Map(channelProfiles.map((profile) => [profile.liveId, profile]))
   const totals = {
@@ -295,10 +296,10 @@ export function compactPayload(rows: LiveRow[], profiles: AudienceProfile[], cha
   return {
     scope,
     totals,
-    audienceProfiles: profiles.map((profile) => ({ liveId: profile.liveId, data: profile.data })),
-    channelProfiles: channelProfiles.map((profile) => ({ liveId: profile.liveId, data: profile.data })),
-    selectedProfile: selectedLive ? profileByLive.get(selectedLive.id) || null : null,
-    selectedChannelProfile: selectedLive ? channelProfileByLive.get(selectedLive.id) || null : null,
+    audienceProfiles: profiles.map((profile) => ({ liveId: profile.liveId, topic: liveById.get(profile.liveId)?.topic || '', data: profile.data })),
+    channelProfiles: channelProfiles.map((profile) => ({ liveId: profile.liveId, topic: liveById.get(profile.liveId)?.topic || '', data: profile.data })),
+    selectedProfile: selectedLive ? profileByLive.get(selectedLive.id)?.data || null : null,
+    selectedChannelProfile: selectedLive ? channelProfileByLive.get(selectedLive.id)?.data || null : null,
     selectedLive: selectedLive ? withMetrics(selectedLive) : null,
     lives: metrics,
   }

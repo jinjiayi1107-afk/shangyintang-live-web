@@ -306,7 +306,7 @@ function Dashboard() {
             <LiveSide metrics={metrics} selectedId={selected?.id || ''} onSelect={setSelectedId} />
             <div className="content">
               {tab === 'compare' && <Compare metrics={metrics} />}
-              {tab === 'detail' && selectedMetrics && <Detail live={selectedMetrics} review={detailReview || undefined} isAdmin={isAdmin} busy={busy === 'single'} onAi={() => void generateReview('single')} />}
+              {tab === 'detail' && selectedMetrics && <Detail live={selectedMetrics} channelProfile={currentChannel || null} review={detailReview || undefined} isAdmin={isAdmin} busy={busy === 'single'} onAi={() => void generateReview('single')} />}
               {tab === 'profile' && selected && <Profile live={selected} profile={currentProfile || null} files={profileFiles} message={profileMessage} isAdmin={isAdmin} busy={busy === 'profile'} onFiles={readProfileFiles} onExtract={() => void extractProfile()} />}
               {tab === 'channel' && selected && <Channel live={selected} channelProfile={currentChannel || null} files={channelFiles} message={channelMessage} isAdmin={isAdmin} busy={busy === 'channel'} onFiles={readChannelFiles} onExtract={() => void extractChannel()} />}
               {tab === 'data' && <DataTable metrics={metrics} isAdmin={isAdmin} busy={busy === 'legacy'} legacyText={legacyText} onLegacyText={setLegacyText} onImportLegacy={importLegacySource} />}
@@ -481,7 +481,8 @@ function Bars({ title, rows, metric, format, color }: { title: string; rows: Liv
   )
 }
 
-function Detail({ live, review, isAdmin, busy, onAi }: { live: LiveMetrics; review?: AiReview; isAdmin: boolean; busy: boolean; onAi: () => void }) {
+function Detail({ live, channelProfile, review, isAdmin, busy, onAi }: { live: LiveMetrics; channelProfile: ChannelProfile | null; review?: AiReview; isAdmin: boolean; busy: boolean; onAi: () => void }) {
+  const hasChannel = channelProfile ? hasPositiveChannelData(channelProfile.data) : false
   return (
     <div className="stack">
       <section className="panel">
@@ -492,6 +493,9 @@ function Detail({ live, review, isAdmin, busy, onAi }: { live: LiveMetrics; revi
           <Fact label="平均观看" value={formatSeconds(live.avgWatchSec)} />
           <Fact label="新增关注" value={`${formatNumber(live.follows)}，${formatPercent(live.followRate)}`} />
           <Fact label="成交" value={`${formatMoney(live.gmv)}，${formatNumber(live.orders)} 单`} />
+        </div>
+        <div className={`inline-status detail-status ${hasChannel ? 'success' : 'neutral'}`}>
+          {hasChannel ? '当前场次已有渠道数据，重新生成单场 AI 分析时会纳入渠道来源、预约转化和流量漏斗。' : '当前场次还没有渠道数据，单场 AI 分析只会使用直播基础数据和用户画像。'}
         </div>
       </section>
       <AiPanel title="AI 单场分析" review={review} isAdmin={isAdmin} busy={busy} generateLabel={review ? '重新生成单场 AI 分析' : '生成单场 AI 分析'} onAi={onAi} />

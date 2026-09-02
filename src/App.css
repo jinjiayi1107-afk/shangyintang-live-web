@@ -217,6 +217,16 @@ main {
   color: var(--red);
 }
 
+.inline-status.neutral {
+  border-color: var(--line);
+  background: color-mix(in oklch, var(--panel), var(--bg) 30%);
+  color: var(--muted);
+}
+
+.detail-status {
+  margin-top: 14px;
+}
+
 .summary-grid {
   display: grid;
   grid-template-columns: 1.2fr 0.8fr;
