@@ -111,6 +111,7 @@ function Dashboard() {
   const [notice, setNotice] = useState<Notice | null>(null)
   const [busy, setBusy] = useState('')
   const [profileFiles, setProfileFiles] = useState<UploadImage[]>([])
+  const [profileMessage, setProfileMessage] = useState<Notice | null>(null)
   const [channelFiles, setChannelFiles] = useState<UploadImage[]>([])
   const [channelMessage, setChannelMessage] = useState<Notice | null>(null)
   const [legacyText, setLegacyText] = useState('')
@@ -168,7 +169,9 @@ function Dashboard() {
   }
 
   async function readProfileFiles(files: FileList | null) {
+    const count = files?.length || 0
     await readImageFiles(files, setProfileFiles)
+    setProfileMessage(count ? { text: `已选择 ${count} 张用户画像截图，可以点击识别并关联。`, kind: 'success' } : null)
   }
 
   async function readChannelFiles(files: FileList | null) {
@@ -180,6 +183,7 @@ function Dashboard() {
   async function extractProfile() {
     if (!isAdmin || !selected || !profileFiles.length) return
     setBusy('profile')
+    setProfileMessage({ text: `正在识别 ${profileFiles.length} 张截图，并关联到「${selected.topic}」。`, kind: 'success' })
     try {
       const result = await invokeAi('profile', {
         live: selected,
@@ -189,9 +193,12 @@ function Dashboard() {
       await saveProfile(selected.id, profileFiles.length, result.profile)
       setProfileFiles([])
       await refresh()
+      setProfileMessage({ text: `用户画像已保存到「${selected.topic}」，下方图表已更新。`, kind: 'success' })
       showNotice(`已关联画像：${selected.topic}`)
     } catch (error) {
-      showNotice(error instanceof Error ? error.message : '画像识别失败', 'error')
+      const message = error instanceof Error ? error.message : '画像识别失败'
+      setProfileMessage({ text: message, kind: 'error' })
+      showNotice(message, 'error')
     } finally {
       setBusy('')
     }
@@ -300,7 +307,7 @@ function Dashboard() {
             <div className="content">
               {tab === 'compare' && <Compare metrics={metrics} />}
               {tab === 'detail' && selectedMetrics && <Detail live={selectedMetrics} review={detailReview || undefined} isAdmin={isAdmin} busy={busy === 'single'} onAi={() => void generateReview('single')} />}
-              {tab === 'profile' && selected && <Profile live={selected} profile={currentProfile || null} files={profileFiles} isAdmin={isAdmin} busy={busy === 'profile'} onFiles={readProfileFiles} onExtract={() => void extractProfile()} />}
+              {tab === 'profile' && selected && <Profile live={selected} profile={currentProfile || null} files={profileFiles} message={profileMessage} isAdmin={isAdmin} busy={busy === 'profile'} onFiles={readProfileFiles} onExtract={() => void extractProfile()} />}
               {tab === 'channel' && selected && <Channel live={selected} channelProfile={currentChannel || null} files={channelFiles} message={channelMessage} isAdmin={isAdmin} busy={busy === 'channel'} onFiles={readChannelFiles} onExtract={() => void extractChannel()} />}
               {tab === 'data' && <DataTable metrics={metrics} isAdmin={isAdmin} busy={busy === 'legacy'} legacyText={legacyText} onLegacyText={setLegacyText} onImportLegacy={importLegacySource} />}
             </div>
@@ -492,7 +499,7 @@ function Detail({ live, review, isAdmin, busy, onAi }: { live: LiveMetrics; revi
   )
 }
 
-function Profile({ live, profile, files, isAdmin, busy, onFiles, onExtract }: { live: LiveRow; profile: AudienceProfile | null; files: { name: string; dataUrl: string }[]; isAdmin: boolean; busy: boolean; onFiles: (files: FileList | null) => Promise<void>; onExtract: () => void }) {
+function Profile({ live, profile, files, message, isAdmin, busy, onFiles, onExtract }: { live: LiveRow; profile: AudienceProfile | null; files: UploadImage[]; message: Notice | null; isAdmin: boolean; busy: boolean; onFiles: (files: FileList | null) => Promise<void>; onExtract: () => void }) {
   const data = profile?.data || {}
   return (
     <div className="stack">
@@ -504,6 +511,7 @@ function Profile({ live, profile, files, isAdmin, busy, onFiles, onExtract }: { 
             <button className="button primary" disabled={!files.length || busy} onClick={onExtract}>{busy ? '识别中' : '识别并关联'}</button>
           </div>
         )}
+        {message && <div className={`inline-status ${message.kind}`}>{message.text}</div>}
         {files.length > 0 && <div className="preview">{files.map((file) => <figure key={file.name}><img src={file.dataUrl} /><figcaption>{file.name}</figcaption></figure>)}</div>}
       </section>
       {profile ? <ProfileCharts data={data} /> : <section className="empty">当前场次还没有用户画像数据。</section>}
