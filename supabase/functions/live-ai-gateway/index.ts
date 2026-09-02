@@ -86,6 +86,13 @@ function hasMeaningfulChannelData(value: unknown) {
   return numbers.length > 0
 }
 
+function hasAnyChannelData(value: unknown) {
+  return Array.isArray(value) && value.some((item) => {
+    const data = item && typeof item === 'object' && 'data' in item ? (item as { data?: unknown }).data : item
+    return hasMeaningfulChannelData(data)
+  })
+}
+
 function collectNumbers(value: unknown, numbers: number[]) {
   if (!value || typeof value !== 'object') return
   Object.entries(value as Record<string, unknown>).forEach(([key, item]) => {
@@ -147,7 +154,17 @@ function reviewMentionsChannel(review: unknown) {
   return /渠道分析|渠道来源|预约转化|公域流量|私域流量|加热流量|曝光进房率|进房点击率|预约转观看|商品点击|流量漏斗/.test(JSON.stringify(review || ''))
 }
 
-function buildReviewRevisionPrompt(payload: Record<string, unknown>, firstReview: unknown) {
+function reviewSchema() {
+  return {
+    grade: 'A/B/C',
+    verdictTitle: '一句整体判断',
+    verdictText: '两句话以内的整体复盘',
+    insights: [{ tone: 'good', tag: '渠道分析', title: '标题', body: '分析正文' }],
+    recommendations: [{ title: '动作标题', body: '具体执行建议' }],
+  }
+}
+
+function buildSingleReviewRevisionPrompt(payload: Record<string, unknown>, firstReview: unknown) {
   return [
     '请重写这份单场直播 AI 复盘。第一次分析忽略了 selectedChannelProfile，现在必须把渠道数据和基础直播数据、用户画像综合起来重新判断。',
     '只输出 JSON，不要输出 Markdown。',
@@ -157,13 +174,24 @@ function buildReviewRevisionPrompt(payload: Record<string, unknown>, firstReview
     '渠道相关正文必须引用 selectedChannelProfile 中至少 3 个具体数字，并解释这些数字与 selectedLive 基础指标之间的关系。',
     'recommendations 必须包含至少 1 条渠道承接动作，例如预热视频/预约渠道优化、开场承接、商品点击引导、私域召回、投流质量判断。',
     'JSON 格式：',
-    JSON.stringify({
-      grade: 'A/B/C',
-      verdictTitle: '一句整体判断',
-      verdictText: '两句话以内的整体复盘',
-      insights: [{ tone: 'good', tag: '渠道分析', title: '标题', body: '分析正文' }],
-      recommendations: [{ title: '动作标题', body: '具体执行建议' }],
-    }),
+    JSON.stringify(reviewSchema()),
+    '第一次 AI 分析：',
+    JSON.stringify(firstReview),
+    '完整数据：',
+    JSON.stringify(payload),
+  ].join('\n')
+}
+
+function buildOverviewReviewRevisionPrompt(payload: Record<string, unknown>, firstReview: unknown) {
+  return [
+    '请重写这份复盘总览 AI 分析。第一次分析没有充分使用 channelProfiles，现在必须把各场次渠道数据纳入整体趋势判断。',
+    '只输出 JSON，不要输出 Markdown。',
+    '不要只罗列渠道数据。要比较各场直播在公域流量、私域流量、加热流量、预约渠道、曝光进房、进房点击、成交承接上的差异，并解释这些差异如何影响观看、留存、关注和 GMV。',
+    'insights 必须包含 5 到 7 条，其中至少 2 条要做跨场次渠道对比，tag 使用“渠道结构”“预约转化”“流量漏斗”或“成交承接”。',
+    '渠道相关正文必须点名具体直播场次，并引用 channelProfiles 里的具体数字。',
+    'recommendations 必须包含至少 2 条未来直播建议，分别覆盖渠道投放/预约预热和直播间承接/商品点击引导。',
+    'JSON 格式：',
+    JSON.stringify(reviewSchema()),
     '第一次 AI 分析：',
     JSON.stringify(firstReview),
     '完整数据：',
@@ -345,7 +373,13 @@ Deno.serve(async (request) => {
       if (payload.scope === 'single' && hasMeaningfulChannelData(payload.selectedChannelProfile) && !reviewMentionsChannel(review)) {
         review = await callDeepSeekJson(model, [
           { role: 'system', content: '你是资深直播运营分析师，尤其擅长综合渠道来源、用户画像、留存和成交数据做单场复盘。' },
-          { role: 'user', content: buildReviewRevisionPrompt(payload, review) },
+          { role: 'user', content: buildSingleReviewRevisionPrompt(payload, review) },
+        ])
+      }
+      if (payload.scope === 'overview' && hasAnyChannelData(payload.channelProfiles) && !reviewMentionsChannel(review)) {
+        review = await callDeepSeekJson(model, [
+          { role: 'system', content: '你是资深直播运营负责人，擅长把多场直播的渠道来源、预约转化、留存和成交数据汇总成执行复盘。' },
+          { role: 'user', content: buildOverviewReviewRevisionPrompt(payload, review) },
         ])
       }
       return json({ review })
