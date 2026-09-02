@@ -99,7 +99,7 @@ export async function loadAppData(): Promise<AppData> {
   ])
   if (livesResult.error) throw livesResult.error
   if (profilesResult.error) throw profilesResult.error
-  const channelProfilesMissing = channelProfilesResult.error && String(channelProfilesResult.error.message || '').includes('channel_profiles')
+  const channelProfilesMissing = channelProfilesResult.error && /channel_profiles|schema cache|Could not find/i.test(String(channelProfilesResult.error.message || ''))
   if (channelProfilesResult.error && !channelProfilesMissing) throw channelProfilesResult.error
   if (reviewsResult.error) throw reviewsResult.error
   const channelRows = channelProfilesMissing ? [] : channelProfilesResult.data || []
@@ -154,7 +154,12 @@ export async function saveChannelProfile(liveId: string, imageCount: number, cha
     channel_profile: channelProfile,
     updated_at: new Date().toISOString(),
   }, { onConflict: 'live_id' })
-  if (error) throw error
+  if (error) {
+    if (/channel_profiles|schema cache|Could not find/i.test(String(error.message || ''))) {
+      throw new Error('数据库还没有创建 channel_profiles 表，请先在 Supabase SQL Editor 执行新版 schema.sql 里的渠道表 SQL。')
+    }
+    throw error
+  }
 }
 
 export async function saveReview(scope: 'overview' | 'single', liveId: string | null, rows: LiveRow[], review: AiReview['review']) {
@@ -253,6 +258,7 @@ export async function invokeAi(action: 'review' | 'profile' | 'channel', body: R
   const { data, error } = await supabase.functions.invoke('live-ai-gateway', { body: { action, ...body } })
   if (error) throw new Error(error.message || 'AI gateway request failed')
   if (!data) throw new Error('AI gateway returned empty response')
+  if (data.error) throw new Error(String(data.error))
   return data as { review?: AiReview['review']; profile?: Record<string, unknown>; channelProfile?: ChannelProfile['data']; error?: string }
 }
 

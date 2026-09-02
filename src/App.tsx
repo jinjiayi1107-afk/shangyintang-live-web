@@ -74,6 +74,7 @@ function Dashboard() {
   const [busy, setBusy] = useState('')
   const [profileFiles, setProfileFiles] = useState<UploadImage[]>([])
   const [channelFiles, setChannelFiles] = useState<UploadImage[]>([])
+  const [channelMessage, setChannelMessage] = useState<Notice | null>(null)
   const [legacyText, setLegacyText] = useState('')
   const isAdmin = role === 'admin'
 
@@ -138,7 +139,9 @@ function Dashboard() {
   }
 
   async function readChannelFiles(files: FileList | null) {
+    const count = files?.length || 0
     await readImageFiles(files, setChannelFiles)
+    setChannelMessage(count ? { text: `已选择 ${count} 张渠道截图，可以点击识别并关联。`, kind: 'success' } : null)
   }
 
   async function extractProfile() {
@@ -164,6 +167,7 @@ function Dashboard() {
   async function extractChannel() {
     if (!isAdmin || !selected || !channelFiles.length) return
     setBusy('channel')
+    setChannelMessage({ text: `正在识别 ${channelFiles.length} 张截图，并关联到「${selected.topic}」。`, kind: 'success' })
     try {
       const result = await invokeAi('channel', {
         live: selected,
@@ -173,9 +177,12 @@ function Dashboard() {
       await saveChannelProfile(selected.id, channelFiles.length, result.channelProfile)
       setChannelFiles([])
       await refresh()
+      setChannelMessage({ text: `渠道数据已保存到「${selected.topic}」，下方图表已更新。`, kind: 'success' })
       showNotice(`已关联渠道数据：${selected.topic}`)
     } catch (error) {
-      showNotice(error instanceof Error ? error.message : '渠道识别失败', 'error')
+      const message = error instanceof Error ? error.message : '渠道识别失败'
+      setChannelMessage({ text: message, kind: 'error' })
+      showNotice(message, 'error')
     } finally {
       setBusy('')
     }
@@ -261,7 +268,7 @@ function Dashboard() {
               {tab === 'compare' && <Compare metrics={metrics} />}
               {tab === 'detail' && selectedMetrics && <Detail live={selectedMetrics} review={detailReview || undefined} isAdmin={isAdmin} busy={busy === 'single'} onAi={() => void generateReview('single')} />}
               {tab === 'profile' && selected && <Profile live={selected} profile={currentProfile || null} files={profileFiles} isAdmin={isAdmin} busy={busy === 'profile'} onFiles={readProfileFiles} onExtract={() => void extractProfile()} />}
-              {tab === 'channel' && selected && <Channel live={selected} channelProfile={currentChannel || null} files={channelFiles} isAdmin={isAdmin} busy={busy === 'channel'} onFiles={readChannelFiles} onExtract={() => void extractChannel()} />}
+              {tab === 'channel' && selected && <Channel live={selected} channelProfile={currentChannel || null} files={channelFiles} message={channelMessage} isAdmin={isAdmin} busy={busy === 'channel'} onFiles={readChannelFiles} onExtract={() => void extractChannel()} />}
               {tab === 'data' && <DataTable metrics={metrics} isAdmin={isAdmin} busy={busy === 'legacy'} legacyText={legacyText} onLegacyText={setLegacyText} onImportLegacy={importLegacySource} />}
             </div>
           </section>
@@ -492,7 +499,7 @@ function ProfileBar({ title, items }: { title: string; items: { label: string; p
   return <section className="panel"><h2>{title}</h2>{sorted.length ? sorted.map((item) => <div className="bar compact" key={`${title}-${item.label}`}><span>{item.label}</span><b>{Number(item.percent).toFixed(1)}%</b><i><em style={{ width: `${Math.max(4, item.percent / max * 100)}%` }} /></i></div>) : <p className="muted">暂无可视化数据</p>}</section>
 }
 
-function Channel({ live, channelProfile, files, isAdmin, busy, onFiles, onExtract }: { live: LiveRow; channelProfile: ChannelProfile | null; files: UploadImage[]; isAdmin: boolean; busy: boolean; onFiles: (files: FileList | null) => Promise<void>; onExtract: () => void }) {
+function Channel({ live, channelProfile, files, message, isAdmin, busy, onFiles, onExtract }: { live: LiveRow; channelProfile: ChannelProfile | null; files: UploadImage[]; message: Notice | null; isAdmin: boolean; busy: boolean; onFiles: (files: FileList | null) => Promise<void>; onExtract: () => void }) {
   const data = channelProfile?.data
   return (
     <div className="stack">
@@ -509,6 +516,7 @@ function Channel({ live, channelProfile, files, isAdmin, busy, onFiles, onExtrac
             <button className="button primary" disabled={!files.length || busy} onClick={onExtract}>{busy ? '识别中' : '识别并关联'}</button>
           </div>
         )}
+        {message && <div className={`inline-status ${message.kind}`}>{message.text}</div>}
         {files.length > 0 && <div className="preview">{files.map((file) => <figure key={file.name}><img src={file.dataUrl} /><figcaption>{file.name}</figcaption></figure>)}</div>}
       </section>
       {data ? <ChannelCharts data={data} /> : <section className="empty">当前场次还没有渠道分析数据。</section>}
