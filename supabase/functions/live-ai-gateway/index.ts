@@ -65,6 +65,44 @@ function channelSchema() {
   }
 }
 
+function hasMeaningfulChannelData(value: unknown) {
+  const data = value as {
+    trafficFunnel?: Record<string, unknown>
+    trafficSources?: unknown[]
+    reservationChannels?: unknown[]
+  }
+  const numbers: number[] = []
+  Object.values(data.trafficFunnel || {}).forEach((item) => {
+    const number = finiteNumber(item)
+    if (number !== null && number > 0) numbers.push(number)
+  })
+  ;(data.trafficSources || []).forEach((source) => {
+    collectNumbers(source, numbers)
+  })
+  ;(data.reservationChannels || []).forEach((channel) => {
+    collectNumbers(channel, numbers)
+  })
+  return numbers.length > 0
+}
+
+function collectNumbers(value: unknown, numbers: number[]) {
+  if (!value || typeof value !== 'object') return
+  Object.entries(value as Record<string, unknown>).forEach(([key, item]) => {
+    if (key === 'children' && Array.isArray(item)) {
+      item.forEach((child) => collectNumbers(child, numbers))
+      return
+    }
+    const number = finiteNumber(item)
+    if (number !== null && number > 0) numbers.push(number)
+  })
+}
+
+function finiteNumber(value: unknown) {
+  if (value === null || value === undefined || value === '') return null
+  const number = Number(String(value).replace(/[,，￥¥%\s]/g, ''))
+  return Number.isFinite(number) ? number : null
+}
+
 function buildReviewPrompt(payload: Record<string, unknown>) {
   const scope = payload.scope as Scope
   const mode = scope === 'single'
@@ -133,7 +171,9 @@ function buildProfilePrompt(live: unknown) {
 function buildChannelPrompt(live: unknown) {
   return [
     '请识别这些视频号直播渠道流量分析、预约分析截图，抽取可用于直播复盘的渠道数据。',
-    '只输出 JSON，不要输出 Markdown。',
+    '你必须先逐字读取截图里的表格、漏斗节点和图表标签，再整理成 JSON。',
+    '只输出 JSON，不要输出 Markdown，不要输出解释文字。',
+    '如果截图里出现了数字，必须保留原始数字，不允许全部填 0 或 null。',
     '百分比只输出数字，例如 49.15；金额只输出数字，例如 154；人数和次数只输出数字。',
     '看不清或截图没有出现的数据填 null 或空数组，并在 warnings 里说明。',
     '不要把同一项重复计算；父级渠道和子级渠道要分别保留。',
@@ -184,6 +224,7 @@ async function callVisionJsonWithRepair(messages: unknown[], schema: unknown, la
           `请把下面的${label}识别原始回复转换成指定 JSON 结构。`,
           '只输出 JSON，不要输出 Markdown。',
           '如果原始回复没有某项数据，填 null 或空数组，并在 warnings 里说明。',
+          '如果原始回复包含数字，必须转写到相应字段，不能把所有数字改成 0。',
           '指定 JSON 结构：',
           JSON.stringify(schema),
           '原始回复：',
@@ -255,6 +296,9 @@ Deno.serve(async (request) => {
         { role: 'system', content: '你是严谨的数据录入助手，优先准确抽取截图里的可见数字。' },
         { role: 'user', content },
       ], channelSchema(), '渠道分析')
+      if (!hasMeaningfulChannelData(channelProfile)) {
+        return json({ error: '没有从截图中提取到有效渠道数字，请确认上传的是“渠道流量分析”或“预约分析”截图，并尽量截到右侧表格数字。' }, 422)
+      }
       return json({ channelProfile })
     }
 

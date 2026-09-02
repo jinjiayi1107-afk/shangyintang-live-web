@@ -566,21 +566,24 @@ function Channel({ live, channelProfile, files, message, isAdmin, busy, onFiles,
 }
 
 function ChannelCharts({ data }: { data: ChannelProfile['data'] }) {
+  if (!hasPositiveChannelData(data)) {
+    return <section className="empty">上次渠道识别没有提取到有效数字，请重新上传清晰截图并点击识别并关联。</section>
+  }
   const funnel = data.trafficFunnel || {}
   const funnelRows = [
-    { label: '直播间曝光次数', value: funnel.exposures },
-    { label: '进入直播间次数', value: funnel.entrances },
-    { label: '商品点击次数', value: funnel.productClicks },
-    { label: '创建订单数', value: funnel.createdOrders },
-    { label: '成交订单数', value: funnel.paidOrders },
-  ].filter((item) => Number.isFinite(Number(item.value)))
-  const maxFunnel = Math.max(...funnelRows.map((item) => Number(item.value)), 1)
+    { label: '直播间曝光次数', value: finiteNumber(funnel.exposures) },
+    { label: '进入直播间次数', value: finiteNumber(funnel.entrances) },
+    { label: '商品点击次数', value: finiteNumber(funnel.productClicks) },
+    { label: '创建订单数', value: finiteNumber(funnel.createdOrders) },
+    { label: '成交订单数', value: finiteNumber(funnel.paidOrders) },
+  ].filter((item): item is { label: string; value: number } => item.value !== null)
+  const maxFunnel = Math.max(...funnelRows.map((item) => item.value), 1)
   const rateRows = [
-    { label: '曝光进房率', value: funnel.exposureToEntranceRate },
-    { label: '进房点击率', value: funnel.entranceToClickRate },
-    { label: '点击下单率', value: funnel.clickToOrderRate },
-    { label: '订单支付率', value: funnel.orderPayRate },
-  ].filter((item) => Number.isFinite(Number(item.value)))
+    { label: '曝光进房率', value: finiteNumber(funnel.exposureToEntranceRate) },
+    { label: '进房点击率', value: finiteNumber(funnel.entranceToClickRate) },
+    { label: '点击下单率', value: finiteNumber(funnel.clickToOrderRate) },
+    { label: '订单支付率', value: finiteNumber(funnel.orderPayRate) },
+  ].filter((item): item is { label: string; value: number } => item.value !== null)
   const trafficSources = data.trafficSources || []
   const reservationChannels = data.reservationChannels || []
 
@@ -593,8 +596,8 @@ function ChannelCharts({ data }: { data: ChannelProfile['data'] }) {
             {funnelRows.length ? funnelRows.map((item) => (
               <div className="funnel-row" key={item.label}>
                 <span>{item.label}</span>
-                <i><em style={{ width: `${Math.max(3, Number(item.value) / maxFunnel * 100)}%` }} /></i>
-                <b>{formatNumber(Number(item.value))}</b>
+                <i><em style={{ width: `${Math.max(3, item.value / maxFunnel * 100)}%` }} /></i>
+                <b>{formatNumber(item.value)}</b>
               </div>
             )) : <p className="muted">暂无漏斗数据</p>}
           </div>
@@ -602,7 +605,7 @@ function ChannelCharts({ data }: { data: ChannelProfile['data'] }) {
         <section className="panel">
           <h2>关键转化率</h2>
           <div className="channel-kpis">
-            {rateRows.length ? rateRows.map((item) => <Metric key={item.label} label={item.label} value={`${Number(item.value).toFixed(2)}%`} />) : <p className="muted">暂无转化率数据</p>}
+            {rateRows.length ? rateRows.map((item) => <Metric key={item.label} label={item.label} value={`${item.value.toFixed(2)}%`} />) : <p className="muted">暂无转化率数据</p>}
           </div>
         </section>
       </div>
@@ -641,15 +644,43 @@ function ChannelCharts({ data }: { data: ChannelProfile['data'] }) {
 }
 
 function formatMaybeNumber(value: unknown) {
-  return Number.isFinite(Number(value)) ? formatNumber(Number(value)) : '-'
+  const number = finiteNumber(value)
+  return number === null ? '-' : formatNumber(number)
 }
 
 function formatMaybeRate(value: unknown) {
-  return Number.isFinite(Number(value)) ? `${Number(value).toFixed(2)}%` : '-'
+  const number = finiteNumber(value)
+  return number === null ? '-' : `${number.toFixed(2)}%`
 }
 
 function formatMaybeMoney(value: unknown) {
-  return Number.isFinite(Number(value)) ? formatMoney(Number(value)) : '-'
+  const number = finiteNumber(value)
+  return number === null ? '-' : formatMoney(number)
+}
+
+function finiteNumber(value: unknown) {
+  if (value === null || value === undefined || value === '') return null
+  const number = Number(value)
+  return Number.isFinite(number) ? number : null
+}
+
+function hasPositiveChannelData(data: ChannelProfile['data']) {
+  const values: unknown[] = [
+    ...(data.trafficFunnel ? Object.values(data.trafficFunnel) : []),
+    ...(data.trafficSources || []).flatMap((source) => [
+      source.entrances,
+      source.entranceShare,
+      source.gmv,
+      source.gmvShare,
+      source.gmvPerThousandViews,
+      ...(source.children || []).flatMap((child) => [child.entrances, child.entranceShare, child.gmv, child.gmvShare, child.gmvPerThousandViews]),
+    ]),
+    ...(data.reservationChannels || []).flatMap((row) => [row.reservedUsers, row.reservedShare, row.watchedUsers, row.watchedShare, row.watchRate, row.gmv]),
+  ]
+  return values.some((value) => {
+    const number = finiteNumber(value)
+    return number !== null && number > 0
+  })
 }
 
 function DataTable({ metrics, isAdmin, busy, legacyText, onLegacyText, onImportLegacy }: { metrics: LiveMetrics[]; isAdmin: boolean; busy: boolean; legacyText: string; onLegacyText: (value: string) => void; onImportLegacy: (source: 'storage' | 'text') => void }) {
