@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
-import { BarChart3, Bot, Eye, FileUp, ImageUp, LogOut, RefreshCw, ShieldCheck } from 'lucide-react'
+import { BarChart3, Bot, CheckSquare, Eye, FileUp, ImageUp, LogOut, RefreshCw, ShieldCheck } from 'lucide-react'
 import { supabase } from './lib/supabase'
 import { compactPayload, getRole, importLegacyData, invokeAi, loadAppData, saveChannelProfile, saveProfile, saveReview, upsertLives } from './lib/api'
 import { average, datasetSignature, formatMoney, formatNumber, formatPercent, formatSeconds, maxRow, parseCsv, withMetrics } from './lib/data'
@@ -16,6 +16,7 @@ const accountEmail: Record<string, string> = {
 type Tab = 'overview' | 'compare' | 'detail' | 'profile' | 'channel' | 'data'
 type Notice = { text: string; kind: 'error' | 'success' }
 type UploadImage = { name: string; dataUrl: string }
+type BatchProgress = { running: boolean; done: number; total: number; current: string; failed: number }
 
 function App() {
   const [session, setSession] = useState<Session | null>(null)
@@ -114,6 +115,9 @@ function Dashboard() {
   const [profileMessage, setProfileMessage] = useState<Notice | null>(null)
   const [channelFiles, setChannelFiles] = useState<UploadImage[]>([])
   const [channelMessage, setChannelMessage] = useState<Notice | null>(null)
+  const [batchOpen, setBatchOpen] = useState(false)
+  const [batchSelected, setBatchSelected] = useState<string[]>([])
+  const [batchProgress, setBatchProgress] = useState<BatchProgress>({ running: false, done: 0, total: 0, current: '', failed: 0 })
   const [legacyText, setLegacyText] = useState('')
   const isAdmin = role === 'admin'
 
@@ -228,23 +232,77 @@ function Dashboard() {
     }
   }
 
+  async function generateSingleReviewFor(live: LiveRow) {
+    const result = await invokeAi('review', {
+      payload: compactPayload(data.lives, data.profiles, data.channelProfiles, 'single', live),
+    })
+    if (!result.review) throw new Error('AI 分析返回为空。')
+    await saveReview('single', live.id, data.lives, result.review)
+  }
+
   async function generateReview(scope: 'overview' | 'single') {
     if (!isAdmin) return
-    const live = scope === 'single' ? selected : null
-    if (scope === 'single' && !live) return
+    if (scope === 'single' && !selected) return
     setBusy(scope)
     try {
-      const result = await invokeAi('review', {
-        payload: compactPayload(data.lives, data.profiles, data.channelProfiles, scope, live),
-      })
-      if (!result.review) throw new Error('AI 分析返回为空。')
-      await saveReview(scope, live?.id || null, data.lives, result.review)
+      if (scope === 'single') {
+        await generateSingleReviewFor(selected)
+      } else {
+        const result = await invokeAi('review', {
+          payload: compactPayload(data.lives, data.profiles, data.channelProfiles, scope, null),
+        })
+        if (!result.review) throw new Error('AI 分析返回为空。')
+        await saveReview(scope, null, data.lives, result.review)
+      }
       await refresh()
-      showNotice(scope === 'overview' ? '总览 AI 分析已生成。' : `${live?.topic} 的 AI 分析已生成。`)
+      showNotice(scope === 'overview' ? '总览 AI 分析已生成。' : `${selected?.topic} 的 AI 分析已生成。`)
     } catch (error) {
       showNotice(error instanceof Error ? error.message : 'AI 分析失败', 'error')
     } finally {
       setBusy('')
+    }
+  }
+
+  function toggleBatchPanel() {
+    const opening = !batchOpen
+    if (opening && !batchSelected.length && selected) setBatchSelected([selected.id])
+    setBatchOpen(opening)
+  }
+
+  function toggleBatchLive(id: string) {
+    setBatchSelected((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id])
+  }
+
+  function selectAllBatchLives() {
+    setBatchSelected((current) => current.length === data.lives.length ? [] : data.lives.map((live) => live.id))
+  }
+
+  async function generateBatchReviews() {
+    if (!isAdmin || busy) return
+    const targets = data.lives.filter((live) => batchSelected.includes(live.id))
+    if (!targets.length) {
+      showNotice('请先选择需要重新生成 AI 分析的场次。', 'error')
+      return
+    }
+    let failed = 0
+    setBusy('batch')
+    setBatchProgress({ running: true, done: 0, total: targets.length, current: targets[0]?.topic || '', failed: 0 })
+    try {
+      for (let index = 0; index < targets.length; index += 1) {
+        const live = targets[index]
+        setBatchProgress({ running: true, done: index, total: targets.length, current: live.topic, failed })
+        try {
+          await generateSingleReviewFor(live)
+        } catch {
+          failed += 1
+        }
+        setBatchProgress({ running: true, done: index + 1, total: targets.length, current: live.topic, failed })
+      }
+      await refresh()
+      showNotice(failed ? `批量生成完成，成功 ${targets.length - failed} 场，失败 ${failed} 场。` : `批量生成完成，共 ${targets.length} 场。`, failed ? 'error' : 'success')
+    } finally {
+      setBusy('')
+      setBatchProgress((current) => ({ ...current, running: false, current: '' }))
     }
   }
 
@@ -306,7 +364,7 @@ function Dashboard() {
             <LiveSide metrics={metrics} selectedId={selected?.id || ''} onSelect={setSelectedId} />
             <div className="content">
               {tab === 'compare' && <Compare metrics={metrics} />}
-              {tab === 'detail' && selectedMetrics && <Detail live={selectedMetrics} channelProfile={currentChannel || null} review={detailReview || undefined} isAdmin={isAdmin} busy={busy === 'single'} onAi={() => void generateReview('single')} />}
+              {tab === 'detail' && selectedMetrics && <Detail live={selectedMetrics} lives={metrics} selectedIds={batchSelected} batchOpen={batchOpen} batchProgress={batchProgress} channelProfile={currentChannel || null} review={detailReview || undefined} isAdmin={isAdmin} busy={busy === 'single' || busy === 'batch'} onAi={() => void generateReview('single')} onToggleBatch={toggleBatchPanel} onToggleLive={toggleBatchLive} onSelectAll={selectAllBatchLives} onBatchRun={() => void generateBatchReviews()} />}
               {tab === 'profile' && selected && <Profile live={selected} profile={currentProfile || null} files={profileFiles} message={profileMessage} isAdmin={isAdmin} busy={busy === 'profile'} onFiles={readProfileFiles} onExtract={() => void extractProfile()} />}
               {tab === 'channel' && selected && <Channel live={selected} channelProfile={currentChannel || null} files={channelFiles} message={channelMessage} isAdmin={isAdmin} busy={busy === 'channel'} onFiles={readChannelFiles} onExtract={() => void extractChannel()} />}
               {tab === 'data' && <DataTable metrics={metrics} isAdmin={isAdmin} busy={busy === 'legacy'} legacyText={legacyText} onLegacyText={setLegacyText} onImportLegacy={importLegacySource} />}
@@ -481,12 +539,15 @@ function Bars({ title, rows, metric, format, color }: { title: string; rows: Liv
   )
 }
 
-function Detail({ live, channelProfile, review, isAdmin, busy, onAi }: { live: LiveMetrics; channelProfile: ChannelProfile | null; review?: AiReview; isAdmin: boolean; busy: boolean; onAi: () => void }) {
+function Detail({ live, lives, selectedIds, batchOpen, batchProgress, channelProfile, review, isAdmin, busy, onAi, onToggleBatch, onToggleLive, onSelectAll, onBatchRun }: { live: LiveMetrics; lives: LiveMetrics[]; selectedIds: string[]; batchOpen: boolean; batchProgress: BatchProgress; channelProfile: ChannelProfile | null; review?: AiReview; isAdmin: boolean; busy: boolean; onAi: () => void; onToggleBatch: () => void; onToggleLive: (id: string) => void; onSelectAll: () => void; onBatchRun: () => void }) {
   const hasChannel = channelProfile ? hasPositiveChannelData(channelProfile.data) : false
   return (
     <div className="stack">
       <section className="panel">
-        <h2>{live.topic}</h2>
+        <div className="panel-head">
+          <h2>{live.topic}</h2>
+          {isAdmin && <button className="button" disabled={busy && !batchProgress.running} onClick={onToggleBatch}><CheckSquare size={16} />批量重新生成</button>}
+        </div>
         <div className="facts">
           <Fact label="开始时间" value={live.startedAt} />
           <Fact label="观看人数" value={formatNumber(live.viewers)} />
@@ -498,8 +559,58 @@ function Detail({ live, channelProfile, review, isAdmin, busy, onAi }: { live: L
           {hasChannel ? '当前场次已有渠道数据，重新生成单场 AI 分析时会纳入渠道来源、预约转化和流量漏斗。' : '当前场次还没有渠道数据，单场 AI 分析只会使用直播基础数据和用户画像。'}
         </div>
       </section>
+      {isAdmin && batchOpen && (
+        <BatchReviewPanel
+          lives={lives}
+          selectedIds={selectedIds}
+          progress={batchProgress}
+          busy={busy}
+          onToggleLive={onToggleLive}
+          onSelectAll={onSelectAll}
+          onRun={onBatchRun}
+        />
+      )}
       <AiPanel title="AI 单场分析" review={review} isAdmin={isAdmin} busy={busy} generateLabel={review ? '重新生成单场 AI 分析' : '生成单场 AI 分析'} onAi={onAi} />
     </div>
+  )
+}
+
+function BatchReviewPanel({ lives, selectedIds, progress, busy, onToggleLive, onSelectAll, onRun }: { lives: LiveMetrics[]; selectedIds: string[]; progress: BatchProgress; busy: boolean; onToggleLive: (id: string) => void; onSelectAll: () => void; onRun: () => void }) {
+  const allSelected = selectedIds.length === lives.length && lives.length > 0
+  const percent = progress.total ? Math.round(progress.done / progress.total * 100) : 0
+  return (
+    <section className="panel batch-panel">
+      <div className="panel-head">
+        <div>
+          <h2>批量重新生成单场 AI 分析</h2>
+          <p className="muted">按顺序逐场生成，已关联的用户画像和渠道数据会一起纳入分析。</p>
+        </div>
+        <div className="batch-actions">
+          <button className="button" disabled={busy} onClick={onSelectAll}>{allSelected ? '取消全选' : '全选'}</button>
+          <button className="button primary" disabled={busy || !selectedIds.length} onClick={onRun}>确认生成 {selectedIds.length ? `${selectedIds.length} 场` : ''}</button>
+        </div>
+      </div>
+      <div className="batch-list">
+        {lives.map((item) => {
+          const checked = selectedIds.includes(item.id)
+          return (
+            <label className={`batch-item ${checked ? 'checked' : ''}`} key={item.id}>
+              <input type="checkbox" checked={checked} disabled={busy} onChange={() => onToggleLive(item.id)} />
+              <span><b>{item.topic}</b><small>{formatNumber(item.viewers)} 人观看 · {formatSeconds(item.avgWatchSec)} · {formatMoney(item.gmv)}</small></span>
+            </label>
+          )
+        })}
+      </div>
+      {(progress.running || progress.total > 0) && (
+        <div className="batch-progress">
+          <div className="progress-meta">
+            <b>{progress.done}/{progress.total}</b>
+            <span>{progress.running ? `当前：${progress.current}` : progress.failed ? `已完成，失败 ${progress.failed} 场` : '已完成'}</span>
+          </div>
+          <i><em style={{ width: `${percent}%` }} /></i>
+        </div>
+      )}
+    </section>
   )
 }
 
