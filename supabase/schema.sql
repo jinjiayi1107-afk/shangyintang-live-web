@@ -41,6 +41,15 @@ create table if not exists public.audience_profiles (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.channel_profiles (
+  id uuid primary key default gen_random_uuid(),
+  live_id text not null unique references public.live_sessions(id) on delete cascade,
+  image_count integer not null default 0,
+  channel_profile jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create table if not exists public.ai_reviews (
   id uuid primary key default gen_random_uuid(),
   scope text not null check (scope in ('overview', 'single')),
@@ -75,6 +84,7 @@ $$;
 alter table public.user_roles enable row level security;
 alter table public.live_sessions enable row level security;
 alter table public.audience_profiles enable row level security;
+alter table public.channel_profiles enable row level security;
 alter table public.ai_reviews enable row level security;
 
 drop policy if exists "roles_select_own" on public.user_roles;
@@ -83,6 +93,8 @@ drop policy if exists "lives_select_signed_in" on public.live_sessions;
 drop policy if exists "lives_admin_write" on public.live_sessions;
 drop policy if exists "profiles_select_signed_in" on public.audience_profiles;
 drop policy if exists "profiles_admin_write" on public.audience_profiles;
+drop policy if exists "channel_profiles_select_signed_in" on public.channel_profiles;
+drop policy if exists "channel_profiles_admin_write" on public.channel_profiles;
 drop policy if exists "reviews_select_signed_in" on public.ai_reviews;
 drop policy if exists "reviews_admin_write" on public.ai_reviews;
 
@@ -110,6 +122,15 @@ create policy "profiles_select_signed_in"
 
 create policy "profiles_admin_write"
   on public.audience_profiles for all
+  using (public.is_admin())
+  with check (public.is_admin());
+
+create policy "channel_profiles_select_signed_in"
+  on public.channel_profiles for select
+  using (auth.role() = 'authenticated');
+
+create policy "channel_profiles_admin_write"
+  on public.channel_profiles for all
   using (public.is_admin())
   with check (public.is_admin());
 
@@ -156,6 +177,7 @@ on conflict (id) do update set
   updated_at = now();
 
 create index if not exists audience_profiles_live_idx on public.audience_profiles(live_id);
+create index if not exists channel_profiles_live_idx on public.channel_profiles(live_id);
 create index if not exists ai_reviews_scope_live_idx on public.ai_reviews(scope, live_id);
 
 -- After creating the two Supabase Auth users, run these two lines with real IDs:

@@ -44,6 +44,47 @@ export type AudienceProfile = {
   updatedAt: string
 }
 
+export type ChannelProfile = {
+  id: string
+  liveId: string
+  imageCount: number
+  data: {
+    trafficFunnel?: {
+      exposures?: number
+      entrances?: number
+      productClicks?: number
+      createdOrders?: number
+      paidOrders?: number
+      exposureToEntranceRate?: number
+      entranceToClickRate?: number
+      clickToOrderRate?: number
+      orderPayRate?: number
+    }
+    trafficSources?: {
+      type: string
+      entrances?: number
+      entranceShare?: number
+      gmv?: number
+      gmvShare?: number
+      gmvPerThousandViews?: number
+      children?: { name: string; entrances?: number; entranceShare?: number; gmv?: number; gmvShare?: number; gmvPerThousandViews?: number }[]
+    }[]
+    reservationChannels?: {
+      channel: string
+      reservedUsers?: number
+      reservedShare?: number
+      watchedUsers?: number
+      watchedShare?: number
+      watchRate?: number
+      gmv?: number
+    }[]
+    highlights?: string[]
+    warnings?: string[]
+  }
+  createdAt: string
+  updatedAt: string
+}
+
 export type AiReview = {
   id: string
   scope: 'overview' | 'single'
@@ -62,5 +103,6 @@ export type AiReview = {
 export type AppData = {
   lives: LiveRow[]
   profiles: AudienceProfile[]
+  channelProfiles: ChannelProfile[]
   reviews: AiReview[]
 }

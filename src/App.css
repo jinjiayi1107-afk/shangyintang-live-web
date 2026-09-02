@@ -551,6 +551,95 @@ main {
   background: var(--orange);
 }
 
+.funnel {
+  display: grid;
+  gap: 12px;
+}
+
+.funnel-row {
+  display: grid;
+  grid-template-columns: 130px minmax(120px, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.funnel-row span {
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.funnel-row b {
+  min-width: 70px;
+  font-family: var(--mono);
+  font-size: 12px;
+  text-align: right;
+}
+
+.funnel-row i {
+  display: block;
+  height: 13px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--panel-2);
+}
+
+.funnel-row em {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--green);
+}
+
+.channel-kpis {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.channel-kpis .metric {
+  min-height: 84px;
+}
+
+.channel-notes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.channel-notes h2 {
+  margin-bottom: 8px;
+}
+
+.channel-notes ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 20px;
+  color: var(--muted);
+}
+
+.channel-table h2 {
+  margin-bottom: 10px;
+}
+
+.channel-table table {
+  min-width: 760px;
+}
+
+.group-row td {
+  background: color-mix(in oklch, var(--panel), var(--bg) 24%);
+  font-weight: 700;
+}
+
+td.child-cell {
+  padding-left: 28px;
+  color: var(--muted);
+}
+
 .facts {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -707,7 +796,8 @@ tbody tr:hover td {
 @media (max-width: 1100px) {
   .summary-grid,
   .workspace,
-  .grid2 {
+  .grid2,
+  .channel-notes {
     grid-template-columns: 1fr;
   }
 
@@ -744,8 +834,26 @@ tbody tr:hover td {
   }
 
   .score,
-  .insights {
+  .insights,
+  .channel-kpis {
     grid-template-columns: 1fr;
+  }
+
+  .funnel-row {
+    grid-template-columns: 1fr auto;
+    grid-template-areas: "label value" "track track";
+  }
+
+  .funnel-row span {
+    grid-area: label;
+  }
+
+  .funnel-row b {
+    grid-area: value;
+  }
+
+  .funnel-row i {
+    grid-area: track;
   }
 
   .tabs {

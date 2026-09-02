@@ -53,6 +53,7 @@ function buildReviewPrompt(payload: Record<string, unknown>) {
     '只输出 JSON，不要输出 Markdown。',
     '不要编造数据，结论必须点名具体直播场次并带关键数字。',
     '如果 audienceProfiles 或 selectedProfile 有数据，需要结合用户画像解释受众结构、消费力、地域和内容匹配度。',
+    '如果 channelProfiles 或 selectedChannelProfile 有数据，需要结合渠道来源、预约转观看、曝光进房漏斗和成交金额解释流量质量与转化问题。',
     'JSON 格式：',
     JSON.stringify({
       grade: 'A/B/C',
@@ -88,6 +89,50 @@ function buildProfilePrompt(live: unknown) {
       fanRatio: { items: [{ label: '粉丝', count: 94, percent: 3.7 }] },
       buyerRatio: { items: [{ label: '曾经买过', count: 4, percent: 0.2 }] },
       sections: ['性别：女性1510人，占比59.5%'],
+      warnings: [],
+    }),
+    '关联直播：',
+    JSON.stringify(live || {}),
+  ].join('\n')
+}
+
+function buildChannelPrompt(live: unknown) {
+  return [
+    '请识别这些视频号直播渠道流量分析、预约分析截图，抽取可用于直播复盘的渠道数据。',
+    '只输出 JSON，不要输出 Markdown。',
+    '百分比只输出数字，例如 49.15；金额只输出数字，例如 154；人数和次数只输出数字。',
+    '看不清或截图没有出现的数据填 null 或空数组，并在 warnings 里说明。',
+    '不要把同一项重复计算；父级渠道和子级渠道要分别保留。',
+    'JSON 格式：',
+    JSON.stringify({
+      highlights: ['公域流量进房3704，占比49.15%'],
+      trafficFunnel: {
+        exposures: 50834,
+        entrances: 7536,
+        productClicks: 238,
+        createdOrders: 5,
+        paidOrders: 5,
+        exposureToEntranceRate: 14.82,
+        entranceToClickRate: 3.16,
+        clickToOrderRate: 2.1,
+        orderPayRate: 100,
+      },
+      trafficSources: [
+        {
+          type: '公域流量',
+          entrances: 3704,
+          entranceShare: 49.15,
+          gmv: 34,
+          gmvShare: 22.08,
+          gmvPerThousandViews: 9.18,
+          children: [
+            { name: '直播推荐', entrances: 3612, entranceShare: 47.93, gmv: 34, gmvShare: 22.08, gmvPerThousandViews: 9.41 },
+          ],
+        },
+      ],
+      reservationChannels: [
+        { channel: '预约抽奖', reservedUsers: 136, reservedShare: 42.37, watchedUsers: 61, watchedShare: 29.47, watchRate: 44.85, gmv: 34 },
+      ],
       warnings: [],
     }),
     '关联直播：',
@@ -141,6 +186,22 @@ Deno.serve(async (request) => {
         { role: 'user', content },
       ])
       return json({ profile })
+    }
+
+    if (action === 'channel') {
+      if (role !== 'admin') return json({ error: 'Only admin can recognize channel images' }, 403)
+      const content = [
+        { type: 'text', text: buildChannelPrompt(body.live) },
+        ...((body.images || []) as { dataUrl: string }[]).slice(0, 6).map((image) => ({
+          type: 'image_url',
+          image_url: { url: image.dataUrl },
+        })),
+      ]
+      const channelProfile = await callDeepSeekJson(Deno.env.get('DEEPSEEK_VISION_MODEL') || 'deepseek-v4-flash-vision-exp', [
+        { role: 'system', content: '你是严谨的数据录入助手，优先准确抽取截图里的可见数字。' },
+        { role: 'user', content },
+      ])
+      return json({ channelProfile })
     }
 
     if (action === 'review') {

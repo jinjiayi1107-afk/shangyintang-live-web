@@ -2,10 +2,10 @@ import { useEffect, useMemo, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { BarChart3, Bot, Eye, FileUp, ImageUp, LogOut, RefreshCw, ShieldCheck } from 'lucide-react'
 import { supabase } from './lib/supabase'
-import { compactPayload, getRole, importLegacyData, invokeAi, loadAppData, saveProfile, saveReview, upsertLives } from './lib/api'
+import { compactPayload, getRole, importLegacyData, invokeAi, loadAppData, saveChannelProfile, saveProfile, saveReview, upsertLives } from './lib/api'
 import { average, datasetSignature, formatMoney, formatNumber, formatPercent, formatSeconds, maxRow, parseCsv, withMetrics } from './lib/data'
 import { seedLives } from './lib/seed'
-import type { AiReview, AppData, AudienceProfile, LiveMetrics, LiveRow, UserRole } from './types'
+import type { AiReview, AppData, AudienceProfile, ChannelProfile, LiveMetrics, LiveRow, UserRole } from './types'
 import './App.css'
 
 const accountEmail: Record<string, string> = {
@@ -13,8 +13,9 @@ const accountEmail: Record<string, string> = {
   guest: 'guest@shangyintang.local',
 }
 
-type Tab = 'overview' | 'compare' | 'detail' | 'profile' | 'data'
+type Tab = 'overview' | 'compare' | 'detail' | 'profile' | 'channel' | 'data'
 type Notice = { text: string; kind: 'error' | 'success' }
+type UploadImage = { name: string; dataUrl: string }
 
 function App() {
   const [session, setSession] = useState<Session | null>(null)
@@ -31,7 +32,7 @@ function App() {
 
   if (loading) return <div className="login-wrap">正在连接 Supabase...</div>
   if (!session) return <Login />
-  return <Dashboard session={session} />
+  return <Dashboard />
 }
 
 function Login() {
@@ -64,14 +65,15 @@ function Login() {
   )
 }
 
-function Dashboard({ session }: { session: Session }) {
+function Dashboard() {
   const [role, setRole] = useState<UserRole>('guest')
   const [tab, setTab] = useState<Tab>('overview')
-  const [data, setData] = useState<AppData>({ lives: seedLives, profiles: [], reviews: [] })
+  const [data, setData] = useState<AppData>({ lives: seedLives, profiles: [], channelProfiles: [], reviews: [] })
   const [selectedId, setSelectedId] = useState(seedLives[0]?.id || '')
   const [notice, setNotice] = useState<Notice | null>(null)
   const [busy, setBusy] = useState('')
-  const [profileFiles, setProfileFiles] = useState<{ name: string; dataUrl: string }[]>([])
+  const [profileFiles, setProfileFiles] = useState<UploadImage[]>([])
+  const [channelFiles, setChannelFiles] = useState<UploadImage[]>([])
   const [legacyText, setLegacyText] = useState('')
   const isAdmin = role === 'admin'
 
@@ -79,7 +81,9 @@ function Dashboard({ session }: { session: Session }) {
   const selected = data.lives.find((live) => live.id === selectedId) || data.lives[0] || null
   const selectedMetrics = selected ? withMetrics(selected) : null
   const profileByLive = useMemo(() => new Map(data.profiles.map((profile) => [profile.liveId, profile])), [data.profiles])
+  const channelByLive = useMemo(() => new Map(data.channelProfiles.map((profile) => [profile.liveId, profile])), [data.channelProfiles])
   const currentProfile = selected ? profileByLive.get(selected.id) || null : null
+  const currentChannel = selected ? channelByLive.get(selected.id) || null : null
   const overviewReview = data.reviews.find((review) => review.scope === 'overview' && review.datasetSignature === datasetSignature(data.lives))
   const detailReview = selected ? data.reviews.find((review) => review.scope === 'single' && review.liveId === selected.id) : null
 
@@ -91,7 +95,10 @@ function Dashboard({ session }: { session: Session }) {
   }
 
   useEffect(() => {
-    refresh().catch((error) => showNotice(error.message, 'error'))
+    const timer = window.setTimeout(() => {
+      refresh().catch((error) => showNotice(error.message, 'error'))
+    }, 0)
+    return () => window.clearTimeout(timer)
   }, [])
 
   function showNotice(text: string, kind: Notice['kind'] = 'success') {
@@ -115,15 +122,23 @@ function Dashboard({ session }: { session: Session }) {
     }
   }
 
-  async function readProfileFiles(files: FileList | null) {
+  async function readImageFiles(files: FileList | null, setter: (files: UploadImage[]) => void) {
     const list = Array.from(files || [])
-    const next = await Promise.all(list.map((file) => new Promise<{ name: string; dataUrl: string }>((resolve, reject) => {
+    const next = await Promise.all(list.map((file) => new Promise<UploadImage>((resolve, reject) => {
       const reader = new FileReader()
       reader.onload = () => resolve({ name: file.name, dataUrl: String(reader.result || '') })
       reader.onerror = reject
       reader.readAsDataURL(file)
     })))
-    setProfileFiles(next)
+    setter(next)
+  }
+
+  async function readProfileFiles(files: FileList | null) {
+    await readImageFiles(files, setProfileFiles)
+  }
+
+  async function readChannelFiles(files: FileList | null) {
+    await readImageFiles(files, setChannelFiles)
   }
 
   async function extractProfile() {
@@ -146,6 +161,26 @@ function Dashboard({ session }: { session: Session }) {
     }
   }
 
+  async function extractChannel() {
+    if (!isAdmin || !selected || !channelFiles.length) return
+    setBusy('channel')
+    try {
+      const result = await invokeAi('channel', {
+        live: selected,
+        images: channelFiles,
+      })
+      if (!result.channelProfile) throw new Error('渠道识别返回为空。')
+      await saveChannelProfile(selected.id, channelFiles.length, result.channelProfile)
+      setChannelFiles([])
+      await refresh()
+      showNotice(`已关联渠道数据：${selected.topic}`)
+    } catch (error) {
+      showNotice(error instanceof Error ? error.message : '渠道识别失败', 'error')
+    } finally {
+      setBusy('')
+    }
+  }
+
   async function generateReview(scope: 'overview' | 'single') {
     if (!isAdmin) return
     const live = scope === 'single' ? selected : null
@@ -153,7 +188,7 @@ function Dashboard({ session }: { session: Session }) {
     setBusy(scope)
     try {
       const result = await invokeAi('review', {
-        payload: compactPayload(data.lives, data.profiles, scope, live),
+        payload: compactPayload(data.lives, data.profiles, data.channelProfiles, scope, live),
       })
       if (!result.review) throw new Error('AI 分析返回为空。')
       await saveReview(scope, live?.id || null, data.lives, result.review)
@@ -211,7 +246,7 @@ function Dashboard({ session }: { session: Session }) {
       <main>
         <Summary metrics={metrics} />
         <nav className="tabs">
-          {(['overview', 'compare', 'detail', 'profile', 'data'] as Tab[]).map((item) => (
+          {(['overview', 'compare', 'detail', 'profile', 'channel', 'data'] as Tab[]).map((item) => (
             <button key={item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{tabName(item)}</button>
           ))}
         </nav>
@@ -226,6 +261,7 @@ function Dashboard({ session }: { session: Session }) {
               {tab === 'compare' && <Compare metrics={metrics} />}
               {tab === 'detail' && selectedMetrics && <Detail live={selectedMetrics} review={detailReview || undefined} isAdmin={isAdmin} busy={busy === 'single'} onAi={() => void generateReview('single')} />}
               {tab === 'profile' && selected && <Profile live={selected} profile={currentProfile || null} files={profileFiles} isAdmin={isAdmin} busy={busy === 'profile'} onFiles={readProfileFiles} onExtract={() => void extractProfile()} />}
+              {tab === 'channel' && selected && <Channel live={selected} channelProfile={currentChannel || null} files={channelFiles} isAdmin={isAdmin} busy={busy === 'channel'} onFiles={readChannelFiles} onExtract={() => void extractChannel()} />}
               {tab === 'data' && <DataTable metrics={metrics} isAdmin={isAdmin} busy={busy === 'legacy'} legacyText={legacyText} onLegacyText={setLegacyText} onImportLegacy={importLegacySource} />}
             </div>
           </section>
@@ -249,7 +285,7 @@ function LiveSide({ metrics, selectedId, onSelect }: { metrics: LiveMetrics[]; s
 }
 
 function tabName(tab: Tab) {
-  return ({ overview: '复盘总览', compare: '场次对比', detail: '单场拆解', profile: '用户画像', data: '原始数据' } satisfies Record<Tab, string>)[tab]
+  return ({ overview: '复盘总览', compare: '场次对比', detail: '单场拆解', profile: '用户画像', channel: '渠道分析', data: '原始数据' } satisfies Record<Tab, string>)[tab]
 }
 
 function Summary({ metrics }: { metrics: LiveMetrics[] }) {
@@ -454,6 +490,117 @@ function ProfileBar({ title, items }: { title: string; items: { label: string; p
   const sorted = [...items].filter((item) => Number.isFinite(Number(item.percent))).sort((a, b) => b.percent - a.percent).slice(0, 8)
   const max = Math.max(...sorted.map((item) => item.percent), 1)
   return <section className="panel"><h2>{title}</h2>{sorted.length ? sorted.map((item) => <div className="bar compact" key={`${title}-${item.label}`}><span>{item.label}</span><b>{Number(item.percent).toFixed(1)}%</b><i><em style={{ width: `${Math.max(4, item.percent / max * 100)}%` }} /></i></div>) : <p className="muted">暂无可视化数据</p>}</section>
+}
+
+function Channel({ live, channelProfile, files, isAdmin, busy, onFiles, onExtract }: { live: LiveRow; channelProfile: ChannelProfile | null; files: UploadImage[]; isAdmin: boolean; busy: boolean; onFiles: (files: FileList | null) => Promise<void>; onExtract: () => void }) {
+  const data = channelProfile?.data
+  return (
+    <div className="stack">
+      <section className="panel">
+        <div className="panel-head">
+          <div>
+            <h2>渠道分析：{live.topic}</h2>
+            <p className="muted">上传渠道流量分析、预约分析截图，识别后会关联到当前场次。</p>
+          </div>
+        </div>
+        {isAdmin && (
+          <div className="upload-row">
+            <label className="button"><ImageUp size={16} />上传渠道截图<input hidden type="file" multiple accept="image/png,image/jpeg,image/webp" onChange={(event) => void onFiles(event.target.files)} /></label>
+            <button className="button primary" disabled={!files.length || busy} onClick={onExtract}>{busy ? '识别中' : '识别并关联'}</button>
+          </div>
+        )}
+        {files.length > 0 && <div className="preview">{files.map((file) => <figure key={file.name}><img src={file.dataUrl} /><figcaption>{file.name}</figcaption></figure>)}</div>}
+      </section>
+      {data ? <ChannelCharts data={data} /> : <section className="empty">当前场次还没有渠道分析数据。</section>}
+    </div>
+  )
+}
+
+function ChannelCharts({ data }: { data: ChannelProfile['data'] }) {
+  const funnel = data.trafficFunnel || {}
+  const funnelRows = [
+    { label: '直播间曝光次数', value: funnel.exposures },
+    { label: '进入直播间次数', value: funnel.entrances },
+    { label: '商品点击次数', value: funnel.productClicks },
+    { label: '创建订单数', value: funnel.createdOrders },
+    { label: '成交订单数', value: funnel.paidOrders },
+  ].filter((item) => Number.isFinite(Number(item.value)))
+  const maxFunnel = Math.max(...funnelRows.map((item) => Number(item.value)), 1)
+  const rateRows = [
+    { label: '曝光进房率', value: funnel.exposureToEntranceRate },
+    { label: '进房点击率', value: funnel.entranceToClickRate },
+    { label: '点击下单率', value: funnel.clickToOrderRate },
+    { label: '订单支付率', value: funnel.orderPayRate },
+  ].filter((item) => Number.isFinite(Number(item.value)))
+  const trafficSources = data.trafficSources || []
+  const reservationChannels = data.reservationChannels || []
+
+  return (
+    <div className="stack">
+      <div className="grid2">
+        <section className="panel">
+          <h2>流量漏斗</h2>
+          <div className="funnel">
+            {funnelRows.length ? funnelRows.map((item) => (
+              <div className="funnel-row" key={item.label}>
+                <span>{item.label}</span>
+                <i><em style={{ width: `${Math.max(3, Number(item.value) / maxFunnel * 100)}%` }} /></i>
+                <b>{formatNumber(Number(item.value))}</b>
+              </div>
+            )) : <p className="muted">暂无漏斗数据</p>}
+          </div>
+        </section>
+        <section className="panel">
+          <h2>关键转化率</h2>
+          <div className="channel-kpis">
+            {rateRows.length ? rateRows.map((item) => <Metric key={item.label} label={item.label} value={`${Number(item.value).toFixed(2)}%`} />) : <p className="muted">暂无转化率数据</p>}
+          </div>
+        </section>
+      </div>
+
+      {(data.highlights?.length || data.warnings?.length) && (
+        <section className="panel channel-notes">
+          {data.highlights?.length ? <div><h2>识别重点</h2><ul>{data.highlights.map((item) => <li key={item}>{item}</li>)}</ul></div> : null}
+          {data.warnings?.length ? <div><h2>需要复核</h2><ul>{data.warnings.map((item) => <li key={item}>{item}</li>)}</ul></div> : null}
+        </section>
+      )}
+
+      <section className="panel table channel-table">
+        <h2>流量来源</h2>
+        <table>
+          <thead><tr>{['类型', '进房人次', '占比', '成交金额', '成交占比', '千次观看成交金额'].map((head) => <th key={head}>{head}</th>)}</tr></thead>
+          <tbody>
+            {trafficSources.length ? trafficSources.flatMap((source) => [
+              <tr key={source.type} className="group-row"><td>{source.type}</td><td>{formatMaybeNumber(source.entrances)}</td><td>{formatMaybeRate(source.entranceShare)}</td><td>{formatMaybeMoney(source.gmv)}</td><td>{formatMaybeRate(source.gmvShare)}</td><td>{formatMaybeMoney(source.gmvPerThousandViews)}</td></tr>,
+              ...((source.children || []).map((child) => <tr key={`${source.type}-${child.name}`}><td className="child-cell">{child.name}</td><td>{formatMaybeNumber(child.entrances)}</td><td>{formatMaybeRate(child.entranceShare)}</td><td>{formatMaybeMoney(child.gmv)}</td><td>{formatMaybeRate(child.gmvShare)}</td><td>{formatMaybeMoney(child.gmvPerThousandViews)}</td></tr>)),
+            ]) : <tr><td colSpan={6}>暂无流量来源数据</td></tr>}
+          </tbody>
+        </table>
+      </section>
+
+      <section className="panel table channel-table">
+        <h2>预约渠道</h2>
+        <table>
+          <thead><tr>{['渠道', '预约人数', '预约占比', '预约观看人数', '观看占比', '预约转观看率', '成交金额'].map((head) => <th key={head}>{head}</th>)}</tr></thead>
+          <tbody>
+            {reservationChannels.length ? reservationChannels.map((row) => <tr key={row.channel}><td>{row.channel}</td><td>{formatMaybeNumber(row.reservedUsers)}</td><td>{formatMaybeRate(row.reservedShare)}</td><td>{formatMaybeNumber(row.watchedUsers)}</td><td>{formatMaybeRate(row.watchedShare)}</td><td>{formatMaybeRate(row.watchRate)}</td><td>{formatMaybeMoney(row.gmv)}</td></tr>) : <tr><td colSpan={7}>暂无预约渠道数据</td></tr>}
+          </tbody>
+        </table>
+      </section>
+    </div>
+  )
+}
+
+function formatMaybeNumber(value: unknown) {
+  return Number.isFinite(Number(value)) ? formatNumber(Number(value)) : '-'
+}
+
+function formatMaybeRate(value: unknown) {
+  return Number.isFinite(Number(value)) ? `${Number(value).toFixed(2)}%` : '-'
+}
+
+function formatMaybeMoney(value: unknown) {
+  return Number.isFinite(Number(value)) ? formatMoney(Number(value)) : '-'
 }
 
 function DataTable({ metrics, isAdmin, busy, legacyText, onLegacyText, onImportLegacy }: { metrics: LiveMetrics[]; isAdmin: boolean; busy: boolean; legacyText: string; onLegacyText: (value: string) => void; onImportLegacy: (source: 'storage' | 'text') => void }) {

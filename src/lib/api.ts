@@ -1,6 +1,6 @@
 import { supabase } from './supabase'
 import { datasetSignature, liveKey, withMetrics } from './data'
-import type { AiReview, AppData, AudienceProfile, LiveRow, UserRole } from '../types'
+import type { AiReview, AppData, AudienceProfile, ChannelProfile, LiveRow, UserRole } from '../types'
 
 type DbLive = {
   id: string
@@ -91,14 +91,18 @@ export async function getRole(): Promise<UserRole> {
 }
 
 export async function loadAppData(): Promise<AppData> {
-  const [livesResult, profilesResult, reviewsResult] = await Promise.all([
+  const [livesResult, profilesResult, channelProfilesResult, reviewsResult] = await Promise.all([
     supabase.from('live_sessions').select('*').order('started_at_text', { ascending: false }),
     supabase.from('audience_profiles').select('*').order('updated_at', { ascending: false }),
+    supabase.from('channel_profiles').select('*').order('updated_at', { ascending: false }),
     supabase.from('ai_reviews').select('*').order('updated_at', { ascending: false }),
   ])
   if (livesResult.error) throw livesResult.error
   if (profilesResult.error) throw profilesResult.error
+  const channelProfilesMissing = channelProfilesResult.error && String(channelProfilesResult.error.message || '').includes('channel_profiles')
+  if (channelProfilesResult.error && !channelProfilesMissing) throw channelProfilesResult.error
   if (reviewsResult.error) throw reviewsResult.error
+  const channelRows = channelProfilesMissing ? [] : channelProfilesResult.data || []
   return {
     lives: ((livesResult.data || []) as DbLive[]).map(fromDbLive),
     profiles: (profilesResult.data || []).map((row) => ({
@@ -106,6 +110,14 @@ export async function loadAppData(): Promise<AppData> {
       liveId: row.live_id,
       imageCount: row.image_count,
       data: row.profile,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    })),
+    channelProfiles: channelRows.map((row) => ({
+      id: row.id,
+      liveId: row.live_id,
+      imageCount: row.image_count,
+      data: row.channel_profile,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     })),
@@ -130,6 +142,16 @@ export async function saveProfile(liveId: string, imageCount: number, profile: R
     live_id: liveId,
     image_count: imageCount,
     profile,
+    updated_at: new Date().toISOString(),
+  }, { onConflict: 'live_id' })
+  if (error) throw error
+}
+
+export async function saveChannelProfile(liveId: string, imageCount: number, channelProfile: ChannelProfile['data']) {
+  const { error } = await supabase.from('channel_profiles').upsert({
+    live_id: liveId,
+    image_count: imageCount,
+    channel_profile: channelProfile,
     updated_at: new Date().toISOString(),
   }, { onConflict: 'live_id' })
   if (error) throw error
@@ -227,16 +249,17 @@ export async function importLegacyData(payload: LegacyImportPayload, rows: LiveR
   return { profileCount, reviewCount, skipped }
 }
 
-export async function invokeAi(action: 'review' | 'profile', body: Record<string, unknown>) {
+export async function invokeAi(action: 'review' | 'profile' | 'channel', body: Record<string, unknown>) {
   const { data, error } = await supabase.functions.invoke('live-ai-gateway', { body: { action, ...body } })
   if (error) throw new Error(error.message || 'AI gateway request failed')
   if (!data) throw new Error('AI gateway returned empty response')
-  return data as { review?: AiReview['review']; profile?: Record<string, unknown>; error?: string }
+  return data as { review?: AiReview['review']; profile?: Record<string, unknown>; channelProfile?: ChannelProfile['data']; error?: string }
 }
 
-export function compactPayload(rows: LiveRow[], profiles: AudienceProfile[], scope: 'overview' | 'single', selectedLive: LiveRow | null) {
+export function compactPayload(rows: LiveRow[], profiles: AudienceProfile[], channelProfiles: ChannelProfile[], scope: 'overview' | 'single', selectedLive: LiveRow | null) {
   const metrics = rows.map(withMetrics)
   const profileByLive = new Map(profiles.map((profile) => [profile.liveId, profile]))
+  const channelProfileByLive = new Map(channelProfiles.map((profile) => [profile.liveId, profile]))
   const totals = {
     liveCount: rows.length,
     totalViewers: metrics.reduce((sum, row) => sum + row.viewers, 0),
@@ -250,7 +273,9 @@ export function compactPayload(rows: LiveRow[], profiles: AudienceProfile[], sco
     scope,
     totals,
     audienceProfiles: profiles.map((profile) => ({ liveId: profile.liveId, data: profile.data })),
+    channelProfiles: channelProfiles.map((profile) => ({ liveId: profile.liveId, data: profile.data })),
     selectedProfile: selectedLive ? profileByLive.get(selectedLive.id) || null : null,
+    selectedChannelProfile: selectedLive ? channelProfileByLive.get(selectedLive.id) || null : null,
     selectedLive: selectedLive ? withMetrics(selectedLive) : null,
     lives: metrics,
   }
