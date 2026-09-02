@@ -787,6 +787,72 @@ td.child-cell {
   transition: width 180ms ease-out;
 }
 
+.global-progress {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 8;
+  display: grid;
+  gap: 10px;
+  width: min(360px, calc(100vw - 28px));
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.global-progress .progress-meta {
+  align-items: flex-start;
+}
+
+.global-progress .progress-meta div {
+  min-width: 0;
+}
+
+.global-progress .progress-meta b,
+.global-progress .progress-meta span {
+  display: block;
+}
+
+.global-progress .progress-meta b {
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 14px;
+}
+
+.global-progress .progress-meta span {
+  overflow: hidden;
+  margin-top: 3px;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.global-progress .progress-meta strong {
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.global-progress i {
+  display: block;
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--panel-2);
+}
+
+.global-progress em {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--green);
+  transition: width 180ms ease-out;
+}
+
 .preview {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
@@ -957,6 +1023,11 @@ tbody tr:hover td {
 
   .button {
     width: 100%;
+  }
+
+  .global-progress {
+    right: 14px;
+    bottom: 14px;
   }
 
   .score,

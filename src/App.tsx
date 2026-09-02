@@ -130,6 +130,8 @@ function Dashboard() {
   const currentChannel = selected ? channelByLive.get(selected.id) || null : null
   const overviewReview = data.reviews.find((review) => review.scope === 'overview' && review.datasetSignature === datasetSignature(data.lives))
   const detailReview = selected ? data.reviews.find((review) => review.scope === 'single' && review.liveId === selected.id) : null
+  const aiBusyName = aiFlowName(busy)
+  const aiBusyTitle = aiBusyName ? `当前正在运行：${aiBusyName}` : undefined
 
   async function refresh() {
     const [nextRole, nextData] = await Promise.all([getRole(), loadAppData()])
@@ -185,7 +187,7 @@ function Dashboard() {
   }
 
   async function extractProfile() {
-    if (!isAdmin || !selected || !profileFiles.length) return
+    if (!isAdmin || aiBusyName || !selected || !profileFiles.length) return
     setBusy('profile')
     setProfileMessage({ text: `正在识别 ${profileFiles.length} 张截图，并关联到「${selected.topic}」。`, kind: 'success' })
     try {
@@ -209,7 +211,7 @@ function Dashboard() {
   }
 
   async function extractChannel() {
-    if (!isAdmin || !selected || !channelFiles.length) return
+    if (!isAdmin || aiBusyName || !selected || !channelFiles.length) return
     setBusy('channel')
     setChannelMessage({ text: `正在识别 ${channelFiles.length} 张截图，并关联到「${selected.topic}」。`, kind: 'success' })
     try {
@@ -241,7 +243,7 @@ function Dashboard() {
   }
 
   async function generateReview(scope: 'overview' | 'single') {
-    if (!isAdmin) return
+    if (!isAdmin || aiBusyName) return
     if (scope === 'single' && !selected) return
     setBusy(scope)
     try {
@@ -278,7 +280,7 @@ function Dashboard() {
   }
 
   async function generateBatchReviews() {
-    if (!isAdmin || busy) return
+    if (!isAdmin || aiBusyName) return
     const targets = data.lives.filter((live) => batchSelected.includes(live.id))
     if (!targets.length) {
       showNotice('请先选择需要重新生成 AI 分析的场次。', 'error')
@@ -357,21 +359,22 @@ function Dashboard() {
         </nav>
         {tab === 'overview' ? (
           <section className="content content-full">
-            <Overview metrics={metrics} review={overviewReview} isAdmin={isAdmin} busy={busy === 'overview'} onAi={() => void generateReview('overview')} />
+            <Overview metrics={metrics} review={overviewReview} isAdmin={isAdmin} busy={busy === 'overview'} disabled={Boolean(aiBusyName) && busy !== 'overview'} disabledTitle={aiBusyTitle} onAi={() => void generateReview('overview')} />
           </section>
         ) : (
           <section className="workspace">
             <LiveSide metrics={metrics} selectedId={selected?.id || ''} onSelect={setSelectedId} />
             <div className="content">
               {tab === 'compare' && <Compare metrics={metrics} />}
-              {tab === 'detail' && selectedMetrics && <Detail live={selectedMetrics} lives={metrics} selectedIds={batchSelected} batchOpen={batchOpen} batchProgress={batchProgress} channelProfile={currentChannel || null} review={detailReview || undefined} isAdmin={isAdmin} busy={busy === 'single' || busy === 'batch'} onAi={() => void generateReview('single')} onToggleBatch={toggleBatchPanel} onToggleLive={toggleBatchLive} onSelectAll={selectAllBatchLives} onBatchRun={() => void generateBatchReviews()} />}
-              {tab === 'profile' && selected && <Profile live={selected} profile={currentProfile || null} files={profileFiles} message={profileMessage} isAdmin={isAdmin} busy={busy === 'profile'} onFiles={readProfileFiles} onExtract={() => void extractProfile()} />}
-              {tab === 'channel' && selected && <Channel live={selected} channelProfile={currentChannel || null} files={channelFiles} message={channelMessage} isAdmin={isAdmin} busy={busy === 'channel'} onFiles={readChannelFiles} onExtract={() => void extractChannel()} />}
+              {tab === 'detail' && selectedMetrics && <Detail live={selectedMetrics} lives={metrics} selectedIds={batchSelected} batchOpen={batchOpen} channelProfile={currentChannel || null} review={detailReview || undefined} isAdmin={isAdmin} busy={busy === 'single' || busy === 'batch'} disabled={Boolean(aiBusyName) && busy !== 'single' && busy !== 'batch'} disabledTitle={aiBusyTitle} onAi={() => void generateReview('single')} onToggleBatch={toggleBatchPanel} onToggleLive={toggleBatchLive} onSelectAll={selectAllBatchLives} onBatchRun={() => void generateBatchReviews()} />}
+              {tab === 'profile' && selected && <Profile live={selected} profile={currentProfile || null} files={profileFiles} message={profileMessage} isAdmin={isAdmin} busy={busy === 'profile'} disabled={Boolean(aiBusyName) && busy !== 'profile'} disabledTitle={aiBusyTitle} onFiles={readProfileFiles} onExtract={() => void extractProfile()} />}
+              {tab === 'channel' && selected && <Channel live={selected} channelProfile={currentChannel || null} files={channelFiles} message={channelMessage} isAdmin={isAdmin} busy={busy === 'channel'} disabled={Boolean(aiBusyName) && busy !== 'channel'} disabledTitle={aiBusyTitle} onFiles={readChannelFiles} onExtract={() => void extractChannel()} />}
               {tab === 'data' && <DataTable metrics={metrics} isAdmin={isAdmin} busy={busy === 'legacy'} legacyText={legacyText} onLegacyText={setLegacyText} onImportLegacy={importLegacySource} />}
             </div>
           </section>
         )}
       </main>
+      <GlobalBatchProgress progress={batchProgress} />
     </div>
   )
 }
@@ -433,7 +436,7 @@ function Metric({ label, value, note }: { label: string; value: string; note?: s
   return <div className="metric"><b>{value}</b><span>{label}</span>{note && <small>{note}</small>}</div>
 }
 
-function Overview({ metrics, review, isAdmin, busy, onAi }: { metrics: LiveMetrics[]; review?: AiReview; isAdmin: boolean; busy: boolean; onAi: () => void }) {
+function Overview({ metrics, review, isAdmin, busy, disabled, disabledTitle, onAi }: { metrics: LiveMetrics[]; review?: AiReview; isAdmin: boolean; busy: boolean; disabled: boolean; disabledTitle?: string; onAi: () => void }) {
   const bestTraffic = maxRow(metrics, 'viewers')
   const bestRetention = maxRow(metrics, 'avgWatchSec')
   const bestEngagement = maxRow(metrics, 'engagementScore')
@@ -453,7 +456,7 @@ function Overview({ metrics, review, isAdmin, busy, onAi }: { metrics: LiveMetri
         <Insight tone={lowFollowHighTraffic ? 'risk' : 'info'} tag="待优化点" title={lowFollowHighTraffic ? `${lowFollowHighTraffic.topic} 流量高但沉淀弱` : '暂无明显高流量低沉淀场次'} body={lowFollowHighTraffic ? `观看 ${formatNumber(lowFollowHighTraffic.viewers)}，关注率仅 ${formatPercent(lowFollowHighTraffic.followRate, 1)}，需要在开场、中段和收尾加入关注理由。` : '继续观察后续场次，重点看流量是否能转为关注和成交。'} />
       </div>
       <Recommendations metrics={metrics} />
-      <AiPanel title="AI 总览复盘" review={review} isAdmin={isAdmin} busy={busy} generateLabel={review ? '重新生成总览 AI 分析' : '生成总览 AI 分析'} onAi={onAi} />
+      <AiPanel title="AI 总览复盘" review={review} isAdmin={isAdmin} busy={busy} disabled={disabled} disabledTitle={disabledTitle} generateLabel={review ? '重新生成总览 AI 分析' : '生成总览 AI 分析'} onAi={onAi} />
     </div>
   )
 }
@@ -539,14 +542,14 @@ function Bars({ title, rows, metric, format, color }: { title: string; rows: Liv
   )
 }
 
-function Detail({ live, lives, selectedIds, batchOpen, batchProgress, channelProfile, review, isAdmin, busy, onAi, onToggleBatch, onToggleLive, onSelectAll, onBatchRun }: { live: LiveMetrics; lives: LiveMetrics[]; selectedIds: string[]; batchOpen: boolean; batchProgress: BatchProgress; channelProfile: ChannelProfile | null; review?: AiReview; isAdmin: boolean; busy: boolean; onAi: () => void; onToggleBatch: () => void; onToggleLive: (id: string) => void; onSelectAll: () => void; onBatchRun: () => void }) {
+function Detail({ live, lives, selectedIds, batchOpen, channelProfile, review, isAdmin, busy, disabled, disabledTitle, onAi, onToggleBatch, onToggleLive, onSelectAll, onBatchRun }: { live: LiveMetrics; lives: LiveMetrics[]; selectedIds: string[]; batchOpen: boolean; channelProfile: ChannelProfile | null; review?: AiReview; isAdmin: boolean; busy: boolean; disabled: boolean; disabledTitle?: string; onAi: () => void; onToggleBatch: () => void; onToggleLive: (id: string) => void; onSelectAll: () => void; onBatchRun: () => void }) {
   const hasChannel = channelProfile ? hasPositiveChannelData(channelProfile.data) : false
   return (
     <div className="stack">
       <section className="panel">
         <div className="panel-head">
           <h2>{live.topic}</h2>
-          {isAdmin && <button className="button" disabled={busy && !batchProgress.running} onClick={onToggleBatch}><CheckSquare size={16} />批量重新生成</button>}
+          {isAdmin && <button className="button" disabled={disabled} title={disabled ? disabledTitle : undefined} onClick={onToggleBatch}><CheckSquare size={16} />批量重新生成</button>}
         </div>
         <div className="facts">
           <Fact label="开始时间" value={live.startedAt} />
@@ -563,21 +566,21 @@ function Detail({ live, lives, selectedIds, batchOpen, batchProgress, channelPro
         <BatchReviewPanel
           lives={lives}
           selectedIds={selectedIds}
-          progress={batchProgress}
           busy={busy}
+          disabled={disabled}
+          disabledTitle={disabledTitle}
           onToggleLive={onToggleLive}
           onSelectAll={onSelectAll}
           onRun={onBatchRun}
         />
       )}
-      <AiPanel title="AI 单场分析" review={review} isAdmin={isAdmin} busy={busy} generateLabel={review ? '重新生成单场 AI 分析' : '生成单场 AI 分析'} onAi={onAi} />
+      <AiPanel title="AI 单场分析" review={review} isAdmin={isAdmin} busy={busy} disabled={disabled} disabledTitle={disabledTitle} generateLabel={review ? '重新生成单场 AI 分析' : '生成单场 AI 分析'} onAi={onAi} />
     </div>
   )
 }
 
-function BatchReviewPanel({ lives, selectedIds, progress, busy, onToggleLive, onSelectAll, onRun }: { lives: LiveMetrics[]; selectedIds: string[]; progress: BatchProgress; busy: boolean; onToggleLive: (id: string) => void; onSelectAll: () => void; onRun: () => void }) {
+function BatchReviewPanel({ lives, selectedIds, busy, disabled, disabledTitle, onToggleLive, onSelectAll, onRun }: { lives: LiveMetrics[]; selectedIds: string[]; busy: boolean; disabled: boolean; disabledTitle?: string; onToggleLive: (id: string) => void; onSelectAll: () => void; onRun: () => void }) {
   const allSelected = selectedIds.length === lives.length && lives.length > 0
-  const percent = progress.total ? Math.round(progress.done / progress.total * 100) : 0
   return (
     <section className="panel batch-panel">
       <div className="panel-head">
@@ -586,8 +589,8 @@ function BatchReviewPanel({ lives, selectedIds, progress, busy, onToggleLive, on
           <p className="muted">按顺序逐场生成，已关联的用户画像和渠道数据会一起纳入分析。</p>
         </div>
         <div className="batch-actions">
-          <button className="button" disabled={busy} onClick={onSelectAll}>{allSelected ? '取消全选' : '全选'}</button>
-          <button className="button primary" disabled={busy || !selectedIds.length} onClick={onRun}>确认生成 {selectedIds.length ? `${selectedIds.length} 场` : ''}</button>
+          <button className="button" disabled={busy} title={busy ? disabledTitle : undefined} onClick={onSelectAll}>{allSelected ? '取消全选' : '全选'}</button>
+          <button className="button primary" disabled={busy || disabled || !selectedIds.length} title={busy || disabled ? disabledTitle : undefined} onClick={onRun}>确认生成 {selectedIds.length ? `${selectedIds.length} 场` : ''}</button>
         </div>
       </div>
       <div className="batch-list">
@@ -601,20 +604,11 @@ function BatchReviewPanel({ lives, selectedIds, progress, busy, onToggleLive, on
           )
         })}
       </div>
-      {(progress.running || progress.total > 0) && (
-        <div className="batch-progress">
-          <div className="progress-meta">
-            <b>{progress.done}/{progress.total}</b>
-            <span>{progress.running ? `当前：${progress.current}` : progress.failed ? `已完成，失败 ${progress.failed} 场` : '已完成'}</span>
-          </div>
-          <i><em style={{ width: `${percent}%` }} /></i>
-        </div>
-      )}
     </section>
   )
 }
 
-function Profile({ live, profile, files, message, isAdmin, busy, onFiles, onExtract }: { live: LiveRow; profile: AudienceProfile | null; files: UploadImage[]; message: Notice | null; isAdmin: boolean; busy: boolean; onFiles: (files: FileList | null) => Promise<void>; onExtract: () => void }) {
+function Profile({ live, profile, files, message, isAdmin, busy, disabled, disabledTitle, onFiles, onExtract }: { live: LiveRow; profile: AudienceProfile | null; files: UploadImage[]; message: Notice | null; isAdmin: boolean; busy: boolean; disabled: boolean; disabledTitle?: string; onFiles: (files: FileList | null) => Promise<void>; onExtract: () => void }) {
   const data = profile?.data || {}
   return (
     <div className="stack">
@@ -623,7 +617,7 @@ function Profile({ live, profile, files, message, isAdmin, busy, onFiles, onExtr
         {isAdmin && (
           <div className="upload-row">
             <label className="button"><ImageUp size={16} />上传画像截图<input hidden type="file" multiple accept="image/png,image/jpeg,image/webp" onChange={(event) => void onFiles(event.target.files)} /></label>
-            <button className="button primary" disabled={!files.length || busy} onClick={onExtract}>{busy ? '识别中' : '识别并关联'}</button>
+            <button className="button primary" disabled={!files.length || busy || disabled} title={disabled || busy ? disabledTitle : undefined} onClick={onExtract}>{busy ? '识别中' : '识别并关联'}</button>
           </div>
         )}
         {message && <div className={`inline-status ${message.kind}`}>{message.text}</div>}
@@ -655,7 +649,7 @@ function ProfileBar({ title, items }: { title: string; items: { label: string; p
   return <section className="panel"><h2>{title}</h2>{sorted.length ? sorted.map((item) => <div className="bar compact" key={`${title}-${item.label}`}><span>{item.label}</span><b>{Number(item.percent).toFixed(1)}%</b><i><em style={{ width: `${Math.max(4, item.percent / max * 100)}%` }} /></i></div>) : <p className="muted">暂无可视化数据</p>}</section>
 }
 
-function Channel({ live, channelProfile, files, message, isAdmin, busy, onFiles, onExtract }: { live: LiveRow; channelProfile: ChannelProfile | null; files: UploadImage[]; message: Notice | null; isAdmin: boolean; busy: boolean; onFiles: (files: FileList | null) => Promise<void>; onExtract: () => void }) {
+function Channel({ live, channelProfile, files, message, isAdmin, busy, disabled, disabledTitle, onFiles, onExtract }: { live: LiveRow; channelProfile: ChannelProfile | null; files: UploadImage[]; message: Notice | null; isAdmin: boolean; busy: boolean; disabled: boolean; disabledTitle?: string; onFiles: (files: FileList | null) => Promise<void>; onExtract: () => void }) {
   const data = channelProfile?.data
   return (
     <div className="stack">
@@ -669,7 +663,7 @@ function Channel({ live, channelProfile, files, message, isAdmin, busy, onFiles,
         {isAdmin && (
           <div className="upload-row">
             <label className="button"><ImageUp size={16} />上传渠道截图<input hidden type="file" multiple accept="image/png,image/jpeg,image/webp" onChange={(event) => void onFiles(event.target.files)} /></label>
-            <button className="button primary" disabled={!files.length || busy} onClick={onExtract}>{busy ? '识别中' : '识别并关联'}</button>
+            <button className="button primary" disabled={!files.length || busy || disabled} title={disabled || busy ? disabledTitle : undefined} onClick={onExtract}>{busy ? '识别中' : '识别并关联'}</button>
           </div>
         )}
         {message && <div className={`inline-status ${message.kind}`}>{message.text}</div>}
@@ -824,8 +818,36 @@ function DataTable({ metrics, isAdmin, busy, legacyText, onLegacyText, onImportL
   )
 }
 
-function AiPanel({ title, review, isAdmin, busy, generateLabel, onAi }: { title: string; review?: AiReview; isAdmin: boolean; busy: boolean; generateLabel: string; onAi: () => void }) {
-  return <section className="panel"><div className="panel-head"><h2>{title}</h2>{isAdmin && <button className="button primary" disabled={busy} onClick={onAi}>{busy ? <RefreshCw size={16} /> : <Bot size={16} />}{busy ? '分析中' : generateLabel}</button>}</div>{review ? <div className="ai"><h3>{review.review.verdictTitle}</h3><p>{review.review.verdictText}</p>{review.review.insights?.map((item, index) => <Insight key={index} tag={item.tag || '复盘点'} title={item.title || ''} body={item.body || ''} />)}{review.review.recommendations?.map((item, index) => <div className="rec" key={index}><div><b>{item.title}</b><span>{item.body}</span></div></div>)}</div> : <div className="empty">还没有生成 AI 分析。</div>}</section>
+function AiPanel({ title, review, isAdmin, busy, disabled, disabledTitle, generateLabel, onAi }: { title: string; review?: AiReview; isAdmin: boolean; busy: boolean; disabled: boolean; disabledTitle?: string; generateLabel: string; onAi: () => void }) {
+  const buttonTitle = disabled || busy ? disabledTitle || `当前正在运行：${title}` : undefined
+  return <section className="panel"><div className="panel-head"><h2>{title}</h2>{isAdmin && <button className="button primary" disabled={busy || disabled} title={buttonTitle} onClick={onAi}>{busy ? <RefreshCw size={16} /> : <Bot size={16} />}{busy ? '分析中' : generateLabel}</button>}</div>{review ? <div className="ai"><h3>{review.review.verdictTitle}</h3><p>{review.review.verdictText}</p>{review.review.insights?.map((item, index) => <Insight key={index} tag={item.tag || '复盘点'} title={item.title || ''} body={item.body || ''} />)}{review.review.recommendations?.map((item, index) => <div className="rec" key={index}><div><b>{item.title}</b><span>{item.body}</span></div></div>)}</div> : <div className="empty">还没有生成 AI 分析。</div>}</section>
+}
+
+function GlobalBatchProgress({ progress }: { progress: BatchProgress }) {
+  if (!progress.running && progress.total === 0) return null
+  const percent = progress.total ? Math.round(progress.done / progress.total * 100) : 0
+  return (
+    <aside className="global-progress" aria-live="polite">
+      <div className="progress-meta">
+        <div>
+          <b>批量 AI 分析</b>
+          <span>{progress.running ? `当前：${progress.current}` : progress.failed ? `已完成，失败 ${progress.failed} 场` : '已完成'}</span>
+        </div>
+        <strong>{progress.done}/{progress.total}</strong>
+      </div>
+      <i><em style={{ width: `${percent}%` }} /></i>
+    </aside>
+  )
+}
+
+function aiFlowName(value: string) {
+  return ({
+    overview: '总览 AI 分析',
+    single: '单场 AI 分析',
+    batch: '批量单场 AI 分析',
+    profile: '用户画像识别',
+    channel: '渠道截图识别',
+  } as Record<string, string>)[value] || ''
 }
 
 function Insight({ tag, title, body, tone = 'info' }: { tag: string; title: string; body: string; tone?: 'good' | 'risk' | 'info' }) {
