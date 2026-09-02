@@ -255,11 +255,28 @@ export async function importLegacyData(payload: LegacyImportPayload, rows: LiveR
 }
 
 export async function invokeAi(action: 'review' | 'profile' | 'channel', body: Record<string, unknown>) {
-  const { data, error } = await supabase.functions.invoke('live-ai-gateway', { body: { action, ...body } })
-  if (error) throw new Error(error.message || 'AI gateway request failed')
+  const { data, error, response } = await supabase.functions.invoke('live-ai-gateway', { body: { action, ...body } })
+  if (error) throw new Error(await functionErrorMessage(response, error.message || 'AI gateway request failed'))
   if (!data) throw new Error('AI gateway returned empty response')
   if (data.error) throw new Error(String(data.error))
   return data as { review?: AiReview['review']; profile?: Record<string, unknown>; channelProfile?: ChannelProfile['data']; error?: string }
+}
+
+async function functionErrorMessage(response: Response | undefined, fallback: string) {
+  if (!response) return fallback
+  try {
+    const payload = await response.clone().json()
+    if (payload?.error) return String(payload.error)
+    if (payload?.message) return String(payload.message)
+  } catch {
+    try {
+      const text = await response.clone().text()
+      if (text.trim()) return text.trim()
+    } catch {
+      return fallback
+    }
+  }
+  return fallback
 }
 
 export function compactPayload(rows: LiveRow[], profiles: AudienceProfile[], channelProfiles: ChannelProfile[], scope: 'overview' | 'single', selectedLive: LiveRow | null) {

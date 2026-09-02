@@ -65,6 +65,44 @@ function Login() {
   )
 }
 
+async function prepareImageFile(file: File): Promise<UploadImage> {
+  const dataUrl = await readFileAsDataUrl(file)
+  if (!file.type.startsWith('image/') || dataUrl.length < 900_000) return { name: file.name, dataUrl }
+  try {
+    const image = await loadImage(dataUrl)
+    const maxSide = 1800
+    const scale = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight))
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale))
+    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale))
+    const context = canvas.getContext('2d')
+    if (!context) return { name: file.name, dataUrl }
+    context.drawImage(image, 0, 0, canvas.width, canvas.height)
+    const compressed = canvas.toDataURL('image/jpeg', 0.82)
+    return { name: file.name, dataUrl: compressed.length < dataUrl.length ? compressed : dataUrl }
+  } catch {
+    return { name: file.name, dataUrl }
+  }
+}
+
+function readFileAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result || ''))
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+}
+
+function loadImage(dataUrl: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image()
+    image.onload = () => resolve(image)
+    image.onerror = reject
+    image.src = dataUrl
+  })
+}
+
 function Dashboard() {
   const [role, setRole] = useState<UserRole>('guest')
   const [tab, setTab] = useState<Tab>('overview')
@@ -125,12 +163,7 @@ function Dashboard() {
 
   async function readImageFiles(files: FileList | null, setter: (files: UploadImage[]) => void) {
     const list = Array.from(files || [])
-    const next = await Promise.all(list.map((file) => new Promise<UploadImage>((resolve, reject) => {
-      const reader = new FileReader()
-      reader.onload = () => resolve({ name: file.name, dataUrl: String(reader.result || '') })
-      reader.onerror = reject
-      reader.readAsDataURL(file)
-    })))
+    const next = await Promise.all(list.map(prepareImageFile))
     setter(next)
   }
 

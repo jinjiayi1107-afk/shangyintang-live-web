@@ -140,13 +140,19 @@ function buildChannelPrompt(live: unknown) {
   ].join('\n')
 }
 
-async function callDeepSeekJson(model: string, messages: unknown[]) {
+async function callDeepSeekJson(model: string, messages: unknown[], useJsonMode = true) {
   const apiKey = Deno.env.get('DEEPSEEK_API_KEY')
   if (!apiKey) throw new Error('DEEPSEEK_API_KEY is not configured')
   const response = await fetch('https://api.deepseek.com/chat/completions', {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model, messages, response_format: { type: 'json_object' }, temperature: 0.25 }),
+    body: JSON.stringify({
+      model,
+      messages,
+      ...(useJsonMode ? { response_format: { type: 'json_object' } } : {}),
+      temperature: 0.25,
+      max_tokens: 4096,
+    }),
   })
   const result = await response.json()
   if (!response.ok) throw new Error(result?.error?.message || `DeepSeek HTTP ${response.status}`)
@@ -184,7 +190,7 @@ Deno.serve(async (request) => {
       const profile = await callDeepSeekJson(Deno.env.get('DEEPSEEK_VISION_MODEL') || 'deepseek-v4-flash-vision-exp', [
         { role: 'system', content: '你是严谨的数据录入助手，优先准确抽取截图里的可见数字。' },
         { role: 'user', content },
-      ])
+      ], false)
       return json({ profile })
     }
 
@@ -200,7 +206,7 @@ Deno.serve(async (request) => {
       const channelProfile = await callDeepSeekJson(Deno.env.get('DEEPSEEK_VISION_MODEL') || 'deepseek-v4-flash-vision-exp', [
         { role: 'system', content: '你是严谨的数据录入助手，优先准确抽取截图里的可见数字。' },
         { role: 'user', content },
-      ])
+      ], false)
       return json({ channelProfile })
     }
 
