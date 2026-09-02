@@ -66,6 +66,7 @@ function channelSchema() {
 }
 
 function hasMeaningfulChannelData(value: unknown) {
+  if (!value || typeof value !== 'object') return false
   const data = value as {
     trafficFunnel?: Record<string, unknown>
     trafficSources?: unknown[]
@@ -138,6 +139,34 @@ function buildReviewPrompt(payload: Record<string, unknown>) {
       recommendations: [{ title: '动作标题', body: '具体执行建议' }],
     }),
     '直播数据：',
+    JSON.stringify(payload),
+  ].join('\n')
+}
+
+function reviewMentionsChannel(review: unknown) {
+  return /渠道分析|渠道来源|预约转化|公域流量|私域流量|加热流量|曝光进房率|进房点击率|预约转观看|商品点击|流量漏斗/.test(JSON.stringify(review || ''))
+}
+
+function buildReviewRevisionPrompt(payload: Record<string, unknown>, firstReview: unknown) {
+  return [
+    '请重写这份单场直播 AI 复盘。第一次分析忽略了 selectedChannelProfile，现在必须把渠道数据和基础直播数据、用户画像综合起来重新判断。',
+    '只输出 JSON，不要输出 Markdown。',
+    '不要只是新增一条渠道描述，而是把渠道来源、曝光进房漏斗、商品点击、预约转观看、GMV、观看人数、留存和用户画像放在一起分析原因和动作。',
+    '如果 selectedChannelProfile 有有效数字，insights 必须包含 4 到 6 条，其中至少 2 条要综合渠道数据。',
+    '渠道相关 insight 的 tag 必须使用“渠道分析”“渠道来源”“预约转化”或“流量漏斗”。',
+    '渠道相关正文必须引用 selectedChannelProfile 中至少 3 个具体数字，并解释这些数字与 selectedLive 基础指标之间的关系。',
+    'recommendations 必须包含至少 1 条渠道承接动作，例如预热视频/预约渠道优化、开场承接、商品点击引导、私域召回、投流质量判断。',
+    'JSON 格式：',
+    JSON.stringify({
+      grade: 'A/B/C',
+      verdictTitle: '一句整体判断',
+      verdictText: '两句话以内的整体复盘',
+      insights: [{ tone: 'good', tag: '渠道分析', title: '标题', body: '分析正文' }],
+      recommendations: [{ title: '动作标题', body: '具体执行建议' }],
+    }),
+    '第一次 AI 分析：',
+    JSON.stringify(firstReview),
+    '完整数据：',
     JSON.stringify(payload),
   ].join('\n')
 }
@@ -307,10 +336,18 @@ Deno.serve(async (request) => {
 
     if (action === 'review') {
       if (role !== 'admin') return json({ error: 'Only admin can generate AI reviews' }, 403)
-      const review = await callDeepSeekJson(Deno.env.get('DEEPSEEK_MODEL') || 'deepseek-v4-flash', [
+      const payload = (body.payload || {}) as Record<string, unknown>
+      const model = Deno.env.get('DEEPSEEK_MODEL') || 'deepseek-v4-flash'
+      let review = await callDeepSeekJson(model, [
         { role: 'system', content: '你是资深直播运营分析师，擅长把场次数据转成可执行复盘。' },
-        { role: 'user', content: buildReviewPrompt(body.payload || {}) },
+        { role: 'user', content: buildReviewPrompt(payload) },
       ])
+      if (payload.scope === 'single' && hasMeaningfulChannelData(payload.selectedChannelProfile) && !reviewMentionsChannel(review)) {
+        review = await callDeepSeekJson(model, [
+          { role: 'system', content: '你是资深直播运营分析师，尤其擅长综合渠道来源、用户画像、留存和成交数据做单场复盘。' },
+          { role: 'user', content: buildReviewRevisionPrompt(payload, review) },
+        ])
+      }
       return json({ review })
     }
 

@@ -238,10 +238,7 @@ function Dashboard() {
         payload: compactPayload(data.lives, data.profiles, data.channelProfiles, scope, live),
       })
       if (!result.review) throw new Error('AI 分析返回为空。')
-      const review = scope === 'single' && live && currentChannel
-        ? ensureSingleReviewHasChannel(result.review, live, currentChannel.data)
-        : result.review
-      await saveReview(scope, live?.id || null, data.lives, review)
+      await saveReview(scope, live?.id || null, data.lives, result.review)
       await refresh()
       showNotice(scope === 'overview' ? '总览 AI 分析已生成。' : `${live?.topic} 的 AI 分析已生成。`)
     } catch (error) {
@@ -718,58 +715,6 @@ function DataTable({ metrics, isAdmin, busy, legacyText, onLegacyText, onImportL
 
 function AiPanel({ title, review, isAdmin, busy, generateLabel, onAi }: { title: string; review?: AiReview; isAdmin: boolean; busy: boolean; generateLabel: string; onAi: () => void }) {
   return <section className="panel"><div className="panel-head"><h2>{title}</h2>{isAdmin && <button className="button primary" disabled={busy} onClick={onAi}>{busy ? <RefreshCw size={16} /> : <Bot size={16} />}{busy ? '分析中' : generateLabel}</button>}</div>{review ? <div className="ai"><h3>{review.review.verdictTitle}</h3><p>{review.review.verdictText}</p>{review.review.insights?.map((item, index) => <Insight key={index} tag={item.tag || '复盘点'} title={item.title || ''} body={item.body || ''} />)}{review.review.recommendations?.map((item, index) => <div className="rec" key={index}><div><b>{item.title}</b><span>{item.body}</span></div></div>)}</div> : <div className="empty">还没有生成 AI 分析。</div>}</section>
-}
-
-function ensureSingleReviewHasChannel(review: AiReview['review'], live: LiveRow, channelData: ChannelProfile['data']) {
-  if (!hasPositiveChannelData(channelData)) return review
-  const reviewText = JSON.stringify(review)
-  if (/渠道分析|渠道来源|预约转化|公域流量|私域流量|曝光进房率|进房点击率|预约转观看/.test(reviewText)) return review
-  return {
-    ...review,
-    insights: [...(review.insights || []), buildChannelInsight(live, channelData)],
-    recommendations: [...(review.recommendations || []), buildChannelRecommendation(channelData)],
-  }
-}
-
-function buildChannelInsight(live: LiveRow, channelData: ChannelProfile['data']) {
-  const funnel = channelData.trafficFunnel || {}
-  const source = bestBy(channelData.trafficSources || [], (item) => finiteNumber(item.entrances) || finiteNumber(item.entranceShare) || 0)
-  const reservation = bestBy(channelData.reservationChannels || [], (item) => finiteNumber(item.watchedUsers) || finiteNumber(item.reservedUsers) || 0)
-  const parts = [
-    `本场基础观看人数为 ${formatNumber(live.viewers)}`,
-    formatChannelRate('曝光进房率', funnel.exposureToEntranceRate),
-    formatChannelRate('进房点击率', funnel.entranceToClickRate),
-    source ? `${source.type}进房${formatMaybeNumber(source.entrances)}，占比${formatMaybeRate(source.entranceShare)}` : '',
-    reservation ? `${reservation.channel}预约${formatMaybeNumber(reservation.reservedUsers)}人，预约转观看率${formatMaybeRate(reservation.watchRate)}` : '',
-    formatMaybeMoney(source?.gmv) !== '-' ? `该渠道成交${formatMaybeMoney(source?.gmv)}` : '',
-  ].filter(Boolean)
-  return {
-    tone: 'info' as const,
-    tag: '渠道分析',
-    title: source ? `${source.type}是本场主要进房来源` : '渠道数据需要纳入单场判断',
-    body: `${parts.join('；')}。这说明单场复盘不能只看观看人数，还要看进房来源、预约承接和商品点击之后的转化。`,
-  }
-}
-
-function buildChannelRecommendation(channelData: ChannelProfile['data']) {
-  const funnel = channelData.trafficFunnel || {}
-  const clickRate = finiteNumber(funnel.entranceToClickRate)
-  const source = bestBy(channelData.trafficSources || [], (item) => finiteNumber(item.entranceShare) || 0)
-  return {
-    title: '下一场单独复盘渠道承接',
-    body: clickRate !== null && clickRate < 5
-      ? `当前进房点击率为 ${clickRate.toFixed(2)}%，建议在${source?.type || '主要渠道'}观众进入后的前 3 分钟加入明确商品或预约动作。`
-      : `建议继续追踪${source?.type || '主要渠道'}的进房质量，并把预约来源、商品点击和成交动作放在同一张复盘表里看。`,
-  }
-}
-
-function bestBy<T>(items: T[], score: (item: T) => number) {
-  return items.reduce<T | null>((best, item) => (!best || score(item) > score(best) ? item : best), null)
-}
-
-function formatChannelRate(label: string, value: unknown) {
-  const number = finiteNumber(value)
-  return number === null ? '' : `${label}${number.toFixed(2)}%`
 }
 
 function Insight({ tag, title, body, tone = 'info' }: { tag: string; title: string; body: string; tone?: 'good' | 'risk' | 'info' }) {
