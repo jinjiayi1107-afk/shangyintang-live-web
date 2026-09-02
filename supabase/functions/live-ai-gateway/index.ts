@@ -20,14 +20,48 @@ function getBearerToken(request: Request) {
 }
 
 function extractJson(text: string) {
-  const raw = String(text || '').trim()
+  const raw = String(text || '').trim().replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim()
   try {
     return JSON.parse(raw)
   } catch {
     const start = raw.indexOf('{')
     const end = raw.lastIndexOf('}')
     if (start >= 0 && end > start) return JSON.parse(raw.slice(start, end + 1))
-    throw new Error('AI returned non-JSON content')
+    throw new Error(`AI returned non-JSON content: ${raw.slice(0, 240) || 'empty response'}`)
+  }
+}
+
+function channelSchema() {
+  return {
+    highlights: ['公域流量进房3704，占比49.15%'],
+    trafficFunnel: {
+      exposures: 50834,
+      entrances: 7536,
+      productClicks: 238,
+      createdOrders: 5,
+      paidOrders: 5,
+      exposureToEntranceRate: 14.82,
+      entranceToClickRate: 3.16,
+      clickToOrderRate: 2.1,
+      orderPayRate: 100,
+    },
+    trafficSources: [
+      {
+        type: '公域流量',
+        entrances: 3704,
+        entranceShare: 49.15,
+        gmv: 34,
+        gmvShare: 22.08,
+        gmvPerThousandViews: 9.18,
+        children: [
+          { name: '直播推荐', entrances: 3612, entranceShare: 47.93, gmv: 34, gmvShare: 22.08, gmvPerThousandViews: 9.41 },
+        ],
+      },
+    ],
+    reservationChannels: [
+      { channel: '预约抽奖', reservedUsers: 136, reservedShare: 42.37, watchedUsers: 61, watchedShare: 29.47, watchRate: 44.85, gmv: 34 },
+    ],
+    warnings: [],
   }
 }
 
@@ -104,43 +138,13 @@ function buildChannelPrompt(live: unknown) {
     '看不清或截图没有出现的数据填 null 或空数组，并在 warnings 里说明。',
     '不要把同一项重复计算；父级渠道和子级渠道要分别保留。',
     'JSON 格式：',
-    JSON.stringify({
-      highlights: ['公域流量进房3704，占比49.15%'],
-      trafficFunnel: {
-        exposures: 50834,
-        entrances: 7536,
-        productClicks: 238,
-        createdOrders: 5,
-        paidOrders: 5,
-        exposureToEntranceRate: 14.82,
-        entranceToClickRate: 3.16,
-        clickToOrderRate: 2.1,
-        orderPayRate: 100,
-      },
-      trafficSources: [
-        {
-          type: '公域流量',
-          entrances: 3704,
-          entranceShare: 49.15,
-          gmv: 34,
-          gmvShare: 22.08,
-          gmvPerThousandViews: 9.18,
-          children: [
-            { name: '直播推荐', entrances: 3612, entranceShare: 47.93, gmv: 34, gmvShare: 22.08, gmvPerThousandViews: 9.41 },
-          ],
-        },
-      ],
-      reservationChannels: [
-        { channel: '预约抽奖', reservedUsers: 136, reservedShare: 42.37, watchedUsers: 61, watchedShare: 29.47, watchRate: 44.85, gmv: 34 },
-      ],
-      warnings: [],
-    }),
+    JSON.stringify(channelSchema()),
     '关联直播：',
     JSON.stringify(live || {}),
   ].join('\n')
 }
 
-async function callDeepSeekJson(model: string, messages: unknown[], useJsonMode = true) {
+async function callDeepSeek(model: string, messages: unknown[], useJsonMode = true) {
   const apiKey = Deno.env.get('DEEPSEEK_API_KEY')
   if (!apiKey) throw new Error('DEEPSEEK_API_KEY is not configured')
   const response = await fetch('https://api.deepseek.com/chat/completions', {
@@ -156,7 +160,39 @@ async function callDeepSeekJson(model: string, messages: unknown[], useJsonMode 
   })
   const result = await response.json()
   if (!response.ok) throw new Error(result?.error?.message || `DeepSeek HTTP ${response.status}`)
-  return extractJson(result?.choices?.[0]?.message?.content || '')
+  return String(result?.choices?.[0]?.message?.content || '')
+}
+
+async function callDeepSeekJson(model: string, messages: unknown[], useJsonMode = true) {
+  return extractJson(await callDeepSeek(model, messages, useJsonMode))
+}
+
+async function callVisionJsonWithRepair(messages: unknown[], schema: unknown, label: string) {
+  const visionModel = Deno.env.get('DEEPSEEK_VISION_MODEL') || 'deepseek-v4-flash-vision-exp'
+  const raw = await callDeepSeek(visionModel, messages, false)
+  try {
+    return extractJson(raw)
+  } catch {
+    const repaired = await callDeepSeekJson(Deno.env.get('DEEPSEEK_MODEL') || 'deepseek-v4-flash', [
+      {
+        role: 'system',
+        content: '你是 JSON 格式修复助手。只根据用户提供的模型原始回复整理 JSON，不补编看不到的数据。',
+      },
+      {
+        role: 'user',
+        content: [
+          `请把下面的${label}识别原始回复转换成指定 JSON 结构。`,
+          '只输出 JSON，不要输出 Markdown。',
+          '如果原始回复没有某项数据，填 null 或空数组，并在 warnings 里说明。',
+          '指定 JSON 结构：',
+          JSON.stringify(schema),
+          '原始回复：',
+          raw,
+        ].join('\n'),
+      },
+    ])
+    return repaired
+  }
 }
 
 Deno.serve(async (request) => {
@@ -187,10 +223,22 @@ Deno.serve(async (request) => {
           image_url: { url: image.dataUrl },
         })),
       ]
-      const profile = await callDeepSeekJson(Deno.env.get('DEEPSEEK_VISION_MODEL') || 'deepseek-v4-flash-vision-exp', [
+      const profile = await callVisionJsonWithRepair([
         { role: 'system', content: '你是严谨的数据录入助手，优先准确抽取截图里的可见数字。' },
         { role: 'user', content },
-      ], false)
+      ], {
+        highlights: ['女性为主，占比59.5%'],
+        gender: { main: '女性为主', items: [{ label: '女性', count: 1510, percent: 59.5 }] },
+        age: { main: '>59岁', items: [{ label: '>59', percent: 29.0 }] },
+        purchasePreference: { main: '服饰内衣', items: [{ label: '服饰内衣', percent: 22.7 }] },
+        crowdAttribute: { main: '小镇中老年', items: [{ label: '小镇中老年', percent: 29.9 }] },
+        consumption: { main: '0-99元', items: [{ label: '0-99', percent: 60.3 }] },
+        region: { main: '上海市', provinces: [], cities: [] },
+        fanRatio: { items: [] },
+        buyerRatio: { items: [] },
+        sections: [],
+        warnings: [],
+      }, '用户画像')
       return json({ profile })
     }
 
@@ -203,10 +251,10 @@ Deno.serve(async (request) => {
           image_url: { url: image.dataUrl },
         })),
       ]
-      const channelProfile = await callDeepSeekJson(Deno.env.get('DEEPSEEK_VISION_MODEL') || 'deepseek-v4-flash-vision-exp', [
+      const channelProfile = await callVisionJsonWithRepair([
         { role: 'system', content: '你是严谨的数据录入助手，优先准确抽取截图里的可见数字。' },
         { role: 'user', content },
-      ], false)
+      ], channelSchema(), '渠道分析')
       return json({ channelProfile })
     }
 
