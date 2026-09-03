@@ -31,6 +31,27 @@ function extractJson(text: string) {
   }
 }
 
+async function repairJsonFromRaw(raw: string, schema: unknown, label: string) {
+  return callDeepSeekJson(Deno.env.get('DEEPSEEK_MODEL') || 'deepseek-v4-flash', [
+    {
+      role: 'system',
+      content: '你是 JSON 格式修复助手。只根据用户提供的模型原始回复整理 JSON，不补编看不到的数据。',
+    },
+    {
+      role: 'user',
+      content: [
+        `请把下面的${label}原始回复转换成指定 JSON 结构。`,
+        '只输出 JSON，不要输出 Markdown。',
+        '如果原始回复已经包含分析结论，请完整保留其含义，只修复格式。',
+        '指定 JSON 结构：',
+        JSON.stringify(schema),
+        '原始回复：',
+        raw,
+      ].join('\n'),
+    },
+  ])
+}
+
 function channelSchema() {
   return {
     highlights: ['公域流量进房3704，占比49.15%'],
@@ -255,7 +276,7 @@ async function callDeepSeek(model: string, messages: unknown[], useJsonMode = tr
       messages,
       ...(useJsonMode ? { response_format: { type: 'json_object' } } : {}),
       temperature: 0.25,
-      max_tokens: 4096,
+      max_tokens: 6144,
     }),
   })
   const result = await response.json()
@@ -267,32 +288,45 @@ async function callDeepSeekJson(model: string, messages: unknown[], useJsonMode 
   return extractJson(await callDeepSeek(model, messages, useJsonMode))
 }
 
+async function callDeepSeekJsonWithRepair(model: string, messages: unknown[], schema: unknown, label: string) {
+  let raw = await callDeepSeek(model, messages, true)
+  try {
+    return extractJson(raw)
+  } catch (firstError) {
+    if (!raw.trim()) {
+      raw = await callDeepSeek(model, [
+        ...messages,
+        {
+          role: 'user',
+          content: [
+            '上一次返回为空，请重新生成。',
+            '必须输出一个合法 JSON 对象，不要输出 Markdown 或解释文字。',
+            'JSON 格式：',
+            JSON.stringify(schema),
+          ].join('\n'),
+        },
+      ], true)
+      try {
+        return extractJson(raw)
+      } catch {
+        if (!raw.trim()) throw new Error(`AI returned empty content while generating ${label}`)
+      }
+    }
+    try {
+      return await repairJsonFromRaw(raw, schema, label)
+    } catch {
+      throw firstError
+    }
+  }
+}
+
 async function callVisionJsonWithRepair(messages: unknown[], schema: unknown, label: string) {
   const visionModel = Deno.env.get('DEEPSEEK_VISION_MODEL') || 'deepseek-v4-flash-vision-exp'
   const raw = await callDeepSeek(visionModel, messages, false)
   try {
     return extractJson(raw)
   } catch {
-    const repaired = await callDeepSeekJson(Deno.env.get('DEEPSEEK_MODEL') || 'deepseek-v4-flash', [
-      {
-        role: 'system',
-        content: '你是 JSON 格式修复助手。只根据用户提供的模型原始回复整理 JSON，不补编看不到的数据。',
-      },
-      {
-        role: 'user',
-        content: [
-          `请把下面的${label}识别原始回复转换成指定 JSON 结构。`,
-          '只输出 JSON，不要输出 Markdown。',
-          '如果原始回复没有某项数据，填 null 或空数组，并在 warnings 里说明。',
-          '如果原始回复包含数字，必须转写到相应字段，不能把所有数字改成 0。',
-          '指定 JSON 结构：',
-          JSON.stringify(schema),
-          '原始回复：',
-          raw,
-        ].join('\n'),
-      },
-    ])
-    return repaired
+    return repairJsonFromRaw(raw, schema, `${label}识别`)
   }
 }
 
@@ -366,21 +400,21 @@ Deno.serve(async (request) => {
       if (role !== 'admin') return json({ error: 'Only admin can generate AI reviews' }, 403)
       const payload = (body.payload || {}) as Record<string, unknown>
       const model = Deno.env.get('DEEPSEEK_MODEL') || 'deepseek-v4-flash'
-      let review = await callDeepSeekJson(model, [
+      let review = await callDeepSeekJsonWithRepair(model, [
         { role: 'system', content: '你是资深直播运营分析师，擅长把场次数据转成可执行复盘。' },
         { role: 'user', content: buildReviewPrompt(payload) },
-      ])
+      ], reviewSchema(), '直播 AI 复盘')
       if (payload.scope === 'single' && hasMeaningfulChannelData(payload.selectedChannelProfile) && !reviewMentionsChannel(review)) {
-        review = await callDeepSeekJson(model, [
+        review = await callDeepSeekJsonWithRepair(model, [
           { role: 'system', content: '你是资深直播运营分析师，尤其擅长综合渠道来源、用户画像、留存和成交数据做单场复盘。' },
           { role: 'user', content: buildSingleReviewRevisionPrompt(payload, review) },
-        ])
+        ], reviewSchema(), '单场渠道综合复盘')
       }
       if (payload.scope === 'overview' && hasAnyChannelData(payload.channelProfiles) && !reviewMentionsChannel(review)) {
-        review = await callDeepSeekJson(model, [
+        review = await callDeepSeekJsonWithRepair(model, [
           { role: 'system', content: '你是资深直播运营负责人，擅长把多场直播的渠道来源、预约转化、留存和成交数据汇总成执行复盘。' },
           { role: 'user', content: buildOverviewReviewRevisionPrompt(payload, review) },
-        ])
+        ], reviewSchema(), '总览渠道综合复盘')
       }
       return json({ review })
     }
