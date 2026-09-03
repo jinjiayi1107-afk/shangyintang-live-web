@@ -16,7 +16,7 @@ const accountEmail: Record<string, string> = {
 type Tab = 'overview' | 'compare' | 'detail' | 'profile' | 'channel' | 'data'
 type Notice = { text: string; kind: 'error' | 'success' }
 type UploadImage = { name: string; dataUrl: string }
-type BatchProgress = { running: boolean; done: number; total: number; current: string; failed: number }
+type BatchProgress = { running: boolean; done: number; total: number; current: string; failed: number; failures: { topic: string; message: string }[] }
 
 function App() {
   const [session, setSession] = useState<Session | null>(null)
@@ -117,7 +117,7 @@ function Dashboard() {
   const [channelMessage, setChannelMessage] = useState<Notice | null>(null)
   const [batchOpen, setBatchOpen] = useState(false)
   const [batchSelected, setBatchSelected] = useState<string[]>([])
-  const [batchProgress, setBatchProgress] = useState<BatchProgress>({ running: false, done: 0, total: 0, current: '', failed: 0 })
+  const [batchProgress, setBatchProgress] = useState<BatchProgress>({ running: false, done: 0, total: 0, current: '', failed: 0, failures: [] })
   const [legacyText, setLegacyText] = useState('')
   const isAdmin = role === 'admin'
 
@@ -287,18 +287,20 @@ function Dashboard() {
       return
     }
     let failed = 0
+    const failures: BatchProgress['failures'] = []
     setBusy('batch')
-    setBatchProgress({ running: true, done: 0, total: targets.length, current: targets[0]?.topic || '', failed: 0 })
+    setBatchProgress({ running: true, done: 0, total: targets.length, current: targets[0]?.topic || '', failed: 0, failures: [] })
     try {
       for (let index = 0; index < targets.length; index += 1) {
         const live = targets[index]
-        setBatchProgress({ running: true, done: index, total: targets.length, current: live.topic, failed })
+        setBatchProgress({ running: true, done: index, total: targets.length, current: live.topic, failed, failures })
         try {
           await generateSingleReviewFor(live)
-        } catch {
+        } catch (error) {
           failed += 1
+          failures.push({ topic: live.topic, message: error instanceof Error ? error.message : '生成失败' })
         }
-        setBatchProgress({ running: true, done: index + 1, total: targets.length, current: live.topic, failed })
+        setBatchProgress({ running: true, done: index + 1, total: targets.length, current: live.topic, failed, failures: [...failures] })
       }
       await refresh()
       showNotice(failed ? `批量生成完成，成功 ${targets.length - failed} 场，失败 ${failed} 场。` : `批量生成完成，共 ${targets.length} 场。`, failed ? 'error' : 'success')
@@ -836,6 +838,12 @@ function GlobalBatchProgress({ progress }: { progress: BatchProgress }) {
         <strong>{progress.done}/{progress.total}</strong>
       </div>
       <i><em style={{ width: `${percent}%` }} /></i>
+      {progress.failures.length > 0 && (
+        <div className="progress-errors">
+          {progress.failures.slice(0, 3).map((item) => <span key={`${item.topic}-${item.message}`} title={item.message}>{item.topic}：{item.message}</span>)}
+          {progress.failures.length > 3 && <span>还有 {progress.failures.length - 3} 场失败</span>}
+        </div>
+      )}
     </aside>
   )
 }

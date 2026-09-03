@@ -179,7 +179,7 @@ export async function saveReview(scope: 'overview' | 'single', liveId: string | 
       .maybeSingle()
     if (findError) throw findError
     if (existing?.id) {
-      const { error } = await supabase.from('ai_reviews').update(payload).eq('id', existing.id)
+      const { error } = await supabase.from('ai_reviews').update(payload).eq('scope', 'overview').is('live_id', null)
       if (error) throw error
       return
     }
@@ -187,7 +187,19 @@ export async function saveReview(scope: 'overview' | 'single', liveId: string | 
     if (error) throw error
     return
   }
-  const { error } = await supabase.from('ai_reviews').upsert(payload, { onConflict: 'scope,live_id' })
+  const { data: existingRows, error: findError } = await supabase
+    .from('ai_reviews')
+    .select('id')
+    .eq('scope', 'single')
+    .eq('live_id', liveId)
+    .limit(1)
+  if (findError) throw findError
+  if (existingRows?.length) {
+    const { error } = await supabase.from('ai_reviews').update(payload).eq('scope', 'single').eq('live_id', liveId)
+    if (error) throw error
+    return
+  }
+  const { error } = await supabase.from('ai_reviews').insert(payload)
   if (error) throw error
 }
 

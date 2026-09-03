@@ -853,6 +853,20 @@ td.child-cell {
   transition: width 180ms ease-out;
 }
 
+.progress-errors {
+  display: grid;
+  gap: 5px;
+  padding-top: 2px;
+}
+
+.progress-errors span {
+  overflow: hidden;
+  color: var(--red);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
 .preview {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
