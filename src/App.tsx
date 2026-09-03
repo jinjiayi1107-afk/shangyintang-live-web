@@ -234,12 +234,12 @@ function Dashboard() {
     }
   }
 
-  async function generateSingleReviewFor(live: LiveRow) {
+  async function generateSingleReviewFor(live: LiveRow, sourceData: AppData = data) {
     const result = await invokeAi('review', {
-      payload: compactPayload(data.lives, data.profiles, data.channelProfiles, 'single', live),
+      payload: compactPayload(sourceData.lives, sourceData.profiles, sourceData.channelProfiles, 'single', live),
     })
     if (!result.review) throw new Error('AI 分析返回为空。')
-    await saveReview('single', live.id, data.lives, result.review)
+    await saveReview('single', live.id, sourceData.lives, result.review)
   }
 
   async function generateReview(scope: 'overview' | 'single') {
@@ -247,14 +247,16 @@ function Dashboard() {
     if (scope === 'single' && !selected) return
     setBusy(scope)
     try {
+      const sourceData = await loadAppData()
       if (scope === 'single') {
-        await generateSingleReviewFor(selected)
+        const live = sourceData.lives.find((item) => item.id === selected.id) || selected
+        await generateSingleReviewFor(live, sourceData)
       } else {
         const result = await invokeAi('review', {
-          payload: compactPayload(data.lives, data.profiles, data.channelProfiles, scope, null),
+          payload: compactPayload(sourceData.lives, sourceData.profiles, sourceData.channelProfiles, scope, null),
         })
         if (!result.review) throw new Error('AI 分析返回为空。')
-        await saveReview(scope, null, data.lives, result.review)
+        await saveReview(scope, null, sourceData.lives, result.review)
       }
       await refresh()
       showNotice(scope === 'overview' ? '总览 AI 分析已生成。' : `${selected?.topic} 的 AI 分析已生成。`)
@@ -281,7 +283,8 @@ function Dashboard() {
 
   async function generateBatchReviews() {
     if (!isAdmin || aiBusyName) return
-    const targets = data.lives.filter((live) => batchSelected.includes(live.id))
+    const sourceData = await loadAppData()
+    const targets = sourceData.lives.filter((live) => batchSelected.includes(live.id))
     if (!targets.length) {
       showNotice('请先选择需要重新生成 AI 分析的场次。', 'error')
       return
@@ -295,7 +298,7 @@ function Dashboard() {
         const live = targets[index]
         setBatchProgress({ running: true, done: index, total: targets.length, current: live.topic, failed, failures })
         try {
-          await generateSingleReviewFor(live)
+          await generateSingleReviewFor(live, sourceData)
         } catch (error) {
           failed += 1
           failures.push({ topic: live.topic, message: error instanceof Error ? error.message : '生成失败' })
@@ -303,7 +306,7 @@ function Dashboard() {
         setBatchProgress({ running: true, done: index + 1, total: targets.length, current: live.topic, failed, failures: [...failures] })
       }
       await refresh()
-      showNotice(failed ? `批量生成完成，成功 ${targets.length - failed} 场，失败 ${failed} 场。` : `批量生成完成，共 ${targets.length} 场。`, failed ? 'error' : 'success')
+      showNotice(failed ? `批量生成完成，成功 ${targets.length - failed} 场，失败 ${failed} 场：${failureSummary(failures)}` : `批量生成完成，共 ${targets.length} 场。`, failed ? 'error' : 'success')
     } finally {
       setBusy('')
       setBatchProgress((current) => ({ ...current, running: false, current: '' }))
@@ -846,6 +849,10 @@ function GlobalBatchProgress({ progress }: { progress: BatchProgress }) {
       )}
     </aside>
   )
+}
+
+function failureSummary(failures: BatchProgress['failures']) {
+  return failures.slice(0, 3).map((item) => `${item.topic}（${item.message}）`).join('；') + (failures.length > 3 ? `；另有 ${failures.length - 3} 场` : '')
 }
 
 function aiFlowName(value: string) {
