@@ -1,6 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 type Scope = 'overview' | 'single'
+type ReviewIssue = { field: string; message: string }
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -183,6 +184,110 @@ function reviewSchema() {
     insights: [{ tone: 'good', tag: '渠道分析', title: '标题', body: '分析正文' }],
     recommendations: [{ title: '动作标题', body: '具体执行建议' }],
   }
+}
+
+function nonEmptyText(value: unknown) {
+  return typeof value === 'string' && value.trim().length >= 2
+}
+
+function reviewText(review: unknown) {
+  return JSON.stringify(review || '')
+}
+
+function hasAudienceData(payload: Record<string, unknown>) {
+  return Boolean(payload.selectedProfile) || (Array.isArray(payload.audienceProfiles) && payload.audienceProfiles.length > 0)
+}
+
+function validateReview(review: unknown, payload: Record<string, unknown>) {
+  const issues: ReviewIssue[] = []
+  const scope = payload.scope as Scope
+  if (!review || typeof review !== 'object') {
+    return [{ field: 'review', message: 'AI 结果不是对象' }]
+  }
+  const data = review as {
+    grade?: unknown
+    verdictTitle?: unknown
+    verdictText?: unknown
+    insights?: { tag?: unknown; title?: unknown; body?: unknown }[]
+    recommendations?: { title?: unknown; body?: unknown }[]
+  }
+  if (!['A', 'B', 'C'].includes(String(data.grade || ''))) issues.push({ field: 'grade', message: '必须是 A/B/C' })
+  if (!nonEmptyText(data.verdictTitle)) issues.push({ field: 'verdictTitle', message: '总判断标题不能为空' })
+  if (!nonEmptyText(data.verdictText) || String(data.verdictText || '').trim().length < 18) issues.push({ field: 'verdictText', message: '总判断正文过短' })
+  if (!Array.isArray(data.insights)) {
+    issues.push({ field: 'insights', message: '必须是数组' })
+  } else {
+    const minInsights = scope === 'overview' ? 5 : 4
+    if (data.insights.length < minInsights) issues.push({ field: 'insights', message: `至少需要 ${minInsights} 条分析点` })
+    data.insights.forEach((item, index) => {
+      if (!nonEmptyText(item?.tag)) issues.push({ field: `insights.${index}.tag`, message: '分析标签不能为空' })
+      if (!nonEmptyText(item?.title)) issues.push({ field: `insights.${index}.title`, message: '分析标题不能为空' })
+      if (!nonEmptyText(item?.body) || String(item?.body || '').trim().length < 28) issues.push({ field: `insights.${index}.body`, message: '分析正文过短' })
+    })
+  }
+  if (!Array.isArray(data.recommendations)) {
+    issues.push({ field: 'recommendations', message: '必须是数组' })
+  } else {
+    if (data.recommendations.length < 3) issues.push({ field: 'recommendations', message: '至少需要 3 条执行建议' })
+    data.recommendations.forEach((item, index) => {
+      if (!nonEmptyText(item?.title)) issues.push({ field: `recommendations.${index}.title`, message: '建议标题不能为空' })
+      if (!nonEmptyText(item?.body) || String(item?.body || '').trim().length < 24) issues.push({ field: `recommendations.${index}.body`, message: '建议正文过短' })
+    })
+  }
+
+  const text = reviewText(review)
+  if (scope === 'single' && hasMeaningfulChannelData(payload.selectedChannelProfile)) {
+    const channelInsightCount = Array.isArray(data.insights)
+      ? data.insights.filter((item) => /渠道分析|渠道来源|预约转化|流量漏斗|成交承接|公域|私域|加热|曝光|进房|预约|商品点击/.test(`${item?.tag || ''}${item?.title || ''}${item?.body || ''}`)).length
+      : 0
+    if (channelInsightCount < 2) issues.push({ field: 'insights', message: '有关联渠道数据时，至少需要 2 条综合渠道分析' })
+    if (!reviewMentionsChannel(review)) issues.push({ field: 'channel', message: '有关联渠道数据时，必须明确分析渠道来源、漏斗或预约转化' })
+  }
+  if (scope === 'overview' && hasAnyChannelData(payload.channelProfiles)) {
+    const channelInsightCount = Array.isArray(data.insights)
+      ? data.insights.filter((item) => /渠道结构|渠道来源|预约转化|流量漏斗|成交承接|公域|私域|加热|曝光|进房|预约|商品点击/.test(`${item?.tag || ''}${item?.title || ''}${item?.body || ''}`)).length
+      : 0
+    if (channelInsightCount < 2) issues.push({ field: 'insights', message: '总览有关联渠道数据时，至少需要 2 条跨场次渠道对比' })
+    if (!reviewMentionsChannel(review)) issues.push({ field: 'channel', message: '总览必须纳入各场次渠道数据' })
+  }
+  if (hasAudienceData(payload) && !/用户画像|受众|人群|年龄|消费力|地域|女性|男性|粉丝|买过|购买偏好/.test(text)) {
+    issues.push({ field: 'audience', message: '有用户画像时，必须结合受众结构分析' })
+  }
+  return issues
+}
+
+function buildReviewQualityRepairPrompt(payload: Record<string, unknown>, firstReview: unknown, issues: ReviewIssue[]) {
+  return [
+    '请重新生成这份直播 AI 复盘。上一版虽然是 JSON，但内容结构或分析完整度不合格。',
+    '只输出 JSON，不要输出 Markdown。',
+    '必须完整覆盖总判断、关键分析点和执行建议，不能留空字段，不能只写概括句。',
+    'insights 必须是具体分析，不要写口号；recommendations 必须是下一场能执行的动作。',
+    '如果有 selectedChannelProfile 或 channelProfiles，必须把渠道来源、曝光进房、商品点击、预约转观看、GMV 与基础直播表现放在一起判断。',
+    '如果有 selectedProfile 或 audienceProfiles，必须结合性别、年龄、消费力、地域或购买偏好分析内容和商品匹配度。',
+    '质量问题：',
+    JSON.stringify(issues),
+    '必须输出此 JSON 结构：',
+    JSON.stringify(reviewSchema()),
+    '上一版 AI 结果：',
+    JSON.stringify(firstReview),
+    '完整数据：',
+    JSON.stringify(payload),
+  ].join('\n')
+}
+
+async function ensureReviewQuality(model: string, review: unknown, payload: Record<string, unknown>) {
+  let issues = validateReview(review, payload)
+  if (!issues.length) return review
+  const repaired = await callDeepSeekJsonWithRepair(model, [
+    { role: 'system', content: '你是资深直播运营负责人，也是严格的复盘质检员。你会重写不完整、不具体、未结合渠道或用户画像的数据复盘。' },
+    { role: 'user', content: buildReviewQualityRepairPrompt(payload, review, issues) },
+  ], reviewSchema(), '直播 AI 复盘质检重写')
+  issues = validateReview(repaired, payload)
+  if (issues.length) {
+    const summary = issues.slice(0, 4).map((item) => `${item.field}: ${item.message}`).join('；')
+    throw new Error(`AI 分析内容不完整，已拒绝保存：${summary}`)
+  }
+  return repaired
 }
 
 function buildSingleReviewRevisionPrompt(payload: Record<string, unknown>, firstReview: unknown) {
@@ -416,6 +521,7 @@ Deno.serve(async (request) => {
           { role: 'user', content: buildOverviewReviewRevisionPrompt(payload, review) },
         ], reviewSchema(), '总览渠道综合复盘')
       }
+      review = await ensureReviewQuality(model, review, payload)
       return json({ review })
     }
 
