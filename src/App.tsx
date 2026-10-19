@@ -340,7 +340,7 @@ function Dashboard() {
       <header className="topbar">
         <div>
           <h1>尚音堂直播数据分析</h1>
-          <p>{isAdmin ? '管理员可上传数据、识别画像和生成 AI 分析' : '访客模式，只能浏览已生成内容'}</p>
+          <p>直播表现、受众与渠道复盘</p>
         </div>
         <div className="actions">
           <span className="role">{isAdmin ? <ShieldCheck size={16} /> : <Eye size={16} />}{isAdmin ? '管理员' : '访客'}</span>
@@ -350,18 +350,19 @@ function Dashboard() {
               <input hidden type="file" accept=".csv,text/csv" onChange={(event) => { const file = event.target.files?.[0]; if (file) void handleCsv(file); event.currentTarget.value = '' }} />
             </label>
           )}
-          <button className="button subtle" onClick={() => void supabase.auth.signOut()}><LogOut size={16} />退出</button>
+          <button className="button subtle" aria-label="退出登录" onClick={() => void supabase.auth.signOut()}><LogOut size={16} /><span>退出</span></button>
         </div>
       </header>
       {notice && <div className={`notice ${notice.kind}`}>{notice.text}</div>}
 
       <main>
-        <Summary metrics={metrics} />
         <nav className="tabs">
           {(['overview', 'compare', 'detail', 'profile', 'channel', 'data'] as Tab[]).map((item) => (
             <button key={item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{tabName(item)}</button>
           ))}
         </nav>
+        {tab === 'overview' && <div className="overview-heading"><h2>复盘总览</h2><p>{periodLabel(metrics)}，共 {metrics.length} 场直播</p></div>}
+        <Summary metrics={metrics} />
         {tab === 'overview' ? (
           <section className="content content-full">
             <Overview metrics={metrics} review={overviewReview} isAdmin={isAdmin} busy={busy === 'overview'} disabled={Boolean(aiBusyName) && busy !== 'overview'} disabledTitle={aiBusyTitle} onAi={() => void generateReview('overview')} />
@@ -413,12 +414,6 @@ function Summary({ metrics }: { metrics: LiveMetrics[] }) {
   return (
     <section className="summary-grid">
       <div className="panel panel-pad">
-        <div className="section-head">
-          <div>
-            <h2>整体复盘</h2>
-            <p>{periodLabel(metrics)}，共 {metrics.length} 场直播</p>
-          </div>
-        </div>
         <div className="score">
           <Metric label="累计观看人数" value={formatNumber(totalViewers)} note={bestTraffic ? `最高：${bestTraffic.topic}` : undefined} />
           <Metric label="平均观看时长" value={formatSeconds(avgWatch)} note={bestRetention ? `最长：${bestRetention.topic}` : undefined} />
@@ -429,6 +424,7 @@ function Summary({ metrics }: { metrics: LiveMetrics[] }) {
       <div className="panel panel-pad verdict">
         <div className="grade">{ruleGrade(metrics)}</div>
         <div>
+          <small>规则复盘 · 综合判断</small>
           <h2>{ruleVerdict(metrics).title}</h2>
           <p>{ruleVerdict(metrics).body}</p>
         </div>
@@ -438,7 +434,7 @@ function Summary({ metrics }: { metrics: LiveMetrics[] }) {
 }
 
 function Metric({ label, value, note }: { label: string; value: string; note?: string }) {
-  return <div className="metric"><b>{value}</b><span>{label}</span>{note && <small>{note}</small>}</div>
+  return <div className="metric"><span>{label}</span><b>{value}</b>{note && <small>{note}</small>}</div>
 }
 
 function Overview({ metrics, review, isAdmin, busy, disabled, disabledTitle, onAi }: { metrics: LiveMetrics[]; review?: AiReview; isAdmin: boolean; busy: boolean; disabled: boolean; disabledTitle?: string; onAi: () => void }) {
@@ -451,17 +447,22 @@ function Overview({ metrics, review, isAdmin, busy, disabled, disabledTitle, onA
     .filter((row) => row.viewers >= average(metrics, 'viewers') && row.followRate < average(metrics, 'followRate'))
     .sort((a, b) => b.viewers - a.viewers)[0]
   return (
-    <div className="stack">
-      <div className="insights">
-        <Insight tone="good" tag="起量样本" title={bestTraffic ? `${bestTraffic.topic} 触达最强` : '暂无数据'} body={bestTraffic ? `观看人数 ${formatNumber(bestTraffic.viewers)}，适合拆解标题、嘉宾、预约和开播时间。` : '上传数据后生成。'} />
-        <Insight tone="info" tag="内容粘性" title={bestRetention ? `${bestRetention.topic} 留存最好` : '暂无数据'} body={bestRetention ? `平均观看 ${formatSeconds(bestRetention.avgWatchSec)}，说明这个主题更能让观众停下来听。` : '上传数据后生成。'} />
-        <Insight tone="good" tag="互动质量" title={bestEngagement ? `${bestEngagement.topic} 互动最强` : '暂无数据'} body={bestEngagement ? `评论率 ${formatPercent(bestEngagement.commentRate, 2)}，分享率 ${formatPercent(bestEngagement.shareRate, 1)}，可作为互动脚本参考。` : '上传数据后生成。'} />
-        <Insight tone="info" tag="关注沉淀" title={bestFollow ? `${bestFollow.topic} 关注转化最好` : '暂无数据'} body={bestFollow ? `新增关注 ${formatNumber(bestFollow.follows)}，关注率 ${formatPercent(bestFollow.followRate, 1)}。` : '上传数据后生成。'} />
-        <Insight tone={bestCommerce && bestCommerce.gmv > 0 ? 'good' : 'risk'} tag="成交结果" title={bestCommerce && bestCommerce.gmv > 0 ? `${bestCommerce.topic} 成交最高` : '成交信号偏弱'} body={bestCommerce && bestCommerce.gmv > 0 ? `成交金额 ${formatMoney(bestCommerce.gmv)}，订单 ${formatNumber(bestCommerce.orders)}，客单价 ${formatMoney(bestCommerce.avgOrderValue)}。` : '当前数据没有明显成交，需要补强商品露出和行动提示。'} />
-        <Insight tone={lowFollowHighTraffic ? 'risk' : 'info'} tag="待优化点" title={lowFollowHighTraffic ? `${lowFollowHighTraffic.topic} 流量高但沉淀弱` : '暂无明显高流量低沉淀场次'} body={lowFollowHighTraffic ? `观看 ${formatNumber(lowFollowHighTraffic.viewers)}，关注率仅 ${formatPercent(lowFollowHighTraffic.followRate, 1)}，需要在开场、中段和收尾加入关注理由。` : '继续观察后续场次，重点看流量是否能转为关注和成交。'} />
+    <div className="stack overview-stack">
+      <section className="overview-findings">
+        <div className="section-head"><h2>关键发现</h2></div>
+        <div className="insights">
+          <Insight tone="good" tag="起量样本" title={bestTraffic ? `${bestTraffic.topic} 触达最强` : '暂无数据'} body={bestTraffic ? `观看人数 ${formatNumber(bestTraffic.viewers)}，适合拆解标题、嘉宾、预约和开播时间。` : '上传数据后生成。'} />
+          <Insight tone="info" tag="内容粘性" title={bestRetention ? `${bestRetention.topic} 留存最好` : '暂无数据'} body={bestRetention ? `平均观看 ${formatSeconds(bestRetention.avgWatchSec)}，说明这个主题更能让观众停下来听。` : '上传数据后生成。'} />
+          <Insight tone="good" tag="互动质量" title={bestEngagement ? `${bestEngagement.topic} 互动最强` : '暂无数据'} body={bestEngagement ? `评论率 ${formatPercent(bestEngagement.commentRate, 2)}，分享率 ${formatPercent(bestEngagement.shareRate, 1)}，可作为互动脚本参考。` : '上传数据后生成。'} />
+          <Insight tone="info" tag="关注沉淀" title={bestFollow ? `${bestFollow.topic} 关注转化最好` : '暂无数据'} body={bestFollow ? `新增关注 ${formatNumber(bestFollow.follows)}，关注率 ${formatPercent(bestFollow.followRate, 1)}。` : '上传数据后生成。'} />
+          <Insight tone={bestCommerce && bestCommerce.gmv > 0 ? 'good' : 'risk'} tag="成交结果" title={bestCommerce && bestCommerce.gmv > 0 ? `${bestCommerce.topic} 成交最高` : '成交信号偏弱'} body={bestCommerce && bestCommerce.gmv > 0 ? `成交金额 ${formatMoney(bestCommerce.gmv)}，订单 ${formatNumber(bestCommerce.orders)}，客单价 ${formatMoney(bestCommerce.avgOrderValue)}。` : '当前数据没有明显成交，需要补强商品露出和行动提示。'} />
+          <Insight tone={lowFollowHighTraffic ? 'risk' : 'info'} tag="待优化点" title={lowFollowHighTraffic ? `${lowFollowHighTraffic.topic} 流量高但沉淀弱` : '暂无明显高流量低沉淀场次'} body={lowFollowHighTraffic ? `观看 ${formatNumber(lowFollowHighTraffic.viewers)}，关注率仅 ${formatPercent(lowFollowHighTraffic.followRate, 1)}，需要在开场、中段和收尾加入关注理由。` : '继续观察后续场次，重点看流量是否能转为关注和成交。'} />
+        </div>
+      </section>
+      <div className="overview-lower">
+        <AiPanel title="AI 总览复盘" review={review} isAdmin={isAdmin} busy={busy} disabled={disabled} disabledTitle={disabledTitle} generateLabel={review ? '重新生成总览 AI 分析' : '生成总览 AI 分析'} onAi={onAi} />
+        <Recommendations metrics={metrics} />
       </div>
-      <Recommendations metrics={metrics} />
-      <AiPanel title="AI 总览复盘" review={review} isAdmin={isAdmin} busy={busy} disabled={disabled} disabledTitle={disabledTitle} generateLabel={review ? '重新生成总览 AI 分析' : '生成总览 AI 分析'} onAi={onAi} />
     </div>
   )
 }
@@ -507,10 +508,7 @@ function Recommendations({ metrics }: { metrics: LiveMetrics[] }) {
   return (
     <section className="panel panel-pad">
       <div className="section-head">
-        <div>
-          <h2>下一轮直播建议</h2>
-          <p>根据当前数据的强弱项自动生成</p>
-        </div>
+        <h2>下一轮直播建议</h2>
       </div>
       <div className="recommendations">{recs.map((rec) => <div className="rec" key={rec.title}><div><b>{rec.title}</b><span>{rec.body}</span></div></div>)}</div>
     </section>
@@ -825,7 +823,7 @@ function DataTable({ metrics, isAdmin, busy, legacyText, onLegacyText, onImportL
 
 function AiPanel({ title, review, isAdmin, busy, disabled, disabledTitle, generateLabel, onAi }: { title: string; review?: AiReview; isAdmin: boolean; busy: boolean; disabled: boolean; disabledTitle?: string; generateLabel: string; onAi: () => void }) {
   const buttonTitle = disabled || busy ? disabledTitle || `当前正在运行：${title}` : undefined
-  return <section className="panel"><div className="panel-head"><h2>{title}</h2>{isAdmin && <button className="button primary" disabled={busy || disabled} title={buttonTitle} onClick={onAi}>{busy ? <RefreshCw size={16} /> : <Bot size={16} />}{busy ? '分析中' : generateLabel}</button>}</div>{review ? <div className="ai"><h3>{review.review.verdictTitle}</h3><p>{review.review.verdictText}</p>{review.review.insights?.map((item, index) => <Insight key={index} tag={item.tag || '复盘点'} title={item.title || ''} body={item.body || ''} />)}{review.review.recommendations?.map((item, index) => <div className="rec" key={index}><div><b>{item.title}</b><span>{item.body}</span></div></div>)}</div> : <div className="empty">还没有生成 AI 分析。</div>}</section>
+  return <section className="panel ai-panel"><div className="panel-head"><h2>{title}</h2>{isAdmin && <button className="button primary" disabled={busy || disabled} title={buttonTitle} onClick={onAi}>{busy ? <RefreshCw size={16} /> : <Bot size={16} />}{busy ? '分析中' : generateLabel}</button>}</div>{review ? <div className="ai"><div className="ai-lead"><h3>{review.review.verdictTitle}</h3><p>{review.review.verdictText}</p></div>{review.review.insights?.map((item, index) => <Insight key={index} tag={item.tag || '复盘点'} title={item.title || ''} body={item.body || ''} />)}{Boolean(review.review.recommendations?.length) && <h3 className="ai-subhead">AI 行动建议</h3>}{review.review.recommendations?.map((item, index) => <div className="rec" key={index}><div><b>{item.title}</b><span>{item.body}</span></div></div>)}</div> : <div className="empty">还没有生成 AI 分析。</div>}</section>
 }
 
 function GlobalBatchProgress({ progress }: { progress: BatchProgress }) {
