@@ -355,10 +355,10 @@ function Dashboard() {
       </header>
       {notice && <div className={`notice ${notice.kind}`}>{notice.text}</div>}
 
-      <main>
-        <nav className="tabs">
+      <main className={`dashboard-main tab-${tab}`}>
+        <nav className="tabs" aria-label="分析模块">
           {(['overview', 'compare', 'detail', 'profile', 'channel', 'data'] as Tab[]).map((item) => (
-            <button key={item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{tabName(item)}</button>
+            <button key={item} className={tab === item ? 'active' : ''} aria-current={tab === item ? 'page' : undefined} onClick={() => setTab(item)}>{tabName(item)}</button>
           ))}
         </nav>
         {tab === 'overview' && <div className="overview-heading"><h2>复盘总览</h2><p>{periodLabel(metrics)}，共 {metrics.length} 场直播</p></div>}
@@ -389,11 +389,18 @@ function LiveSide({ metrics, selectedId, onSelect }: { metrics: LiveMetrics[]; s
   return (
     <aside className="side">
       <h2>直播场次</h2>
-      {metrics.map((live) => (
-        <button key={live.id} className={selectedId === live.id ? 'live active' : 'live'} onClick={() => onSelect(live.id)}>
-          <b>{live.topic}</b><span>{formatNumber(live.viewers)} 人观看 · {formatSeconds(live.avgWatchSec)} · {formatMoney(live.gmv)}</span>
-        </button>
-      ))}
+      <label className="mobile-live-picker">选择直播场次
+        <select value={selectedId} onChange={(event) => onSelect(event.target.value)}>
+          {metrics.map((live) => <option key={live.id} value={live.id}>{live.topic}</option>)}
+        </select>
+      </label>
+      <div className="live-list">
+        {metrics.map((live) => (
+          <button key={live.id} className={selectedId === live.id ? 'live active' : 'live'} onClick={() => onSelect(live.id)}>
+            <b>{live.topic}</b><span>{formatNumber(live.viewers)} 人观看 · {formatSeconds(live.avgWatchSec)} · {formatMoney(live.gmv)}</span>
+          </button>
+        ))}
+      </div>
     </aside>
   )
 }
@@ -624,7 +631,7 @@ function Profile({ live, profile, files, message, isAdmin, busy, disabled, disab
           </div>
         )}
         {message && <div className={`inline-status ${message.kind}`}>{message.text}</div>}
-        {files.length > 0 && <div className="preview">{files.map((file) => <figure key={file.name}><img src={file.dataUrl} /><figcaption>{file.name}</figcaption></figure>)}</div>}
+        {files.length > 0 && <div className="preview">{files.map((file) => <figure key={file.name}><img src={file.dataUrl} alt={file.name} /><figcaption>{file.name}</figcaption></figure>)}</div>}
       </section>
       {profile ? <ProfileCharts data={data} /> : <section className="empty">当前场次还没有用户画像数据。</section>}
     </div>
@@ -670,7 +677,7 @@ function Channel({ live, channelProfile, files, message, isAdmin, busy, disabled
           </div>
         )}
         {message && <div className={`inline-status ${message.kind}`}>{message.text}</div>}
-        {files.length > 0 && <div className="preview">{files.map((file) => <figure key={file.name}><img src={file.dataUrl} /><figcaption>{file.name}</figcaption></figure>)}</div>}
+        {files.length > 0 && <div className="preview">{files.map((file) => <figure key={file.name}><img src={file.dataUrl} alt={file.name} /><figcaption>{file.name}</figcaption></figure>)}</div>}
       </section>
       {data ? <ChannelCharts data={data} /> : <section className="empty">当前场次还没有渠道分析数据。</section>}
     </div>
@@ -735,8 +742,8 @@ function ChannelCharts({ data }: { data: ChannelProfile['data'] }) {
           <thead><tr>{['类型', '进房人次', '占比', '成交金额', '成交占比', '千次观看成交金额'].map((head) => <th key={head}>{head}</th>)}</tr></thead>
           <tbody>
             {trafficSources.length ? trafficSources.flatMap((source) => [
-              <tr key={source.type} className="group-row"><td>{source.type}</td><td>{formatMaybeNumber(source.entrances)}</td><td>{formatMaybeRate(source.entranceShare)}</td><td>{formatMaybeMoney(source.gmv)}</td><td>{formatMaybeRate(source.gmvShare)}</td><td>{formatMaybeMoney(source.gmvPerThousandViews)}</td></tr>,
-              ...((source.children || []).map((child) => <tr key={`${source.type}-${child.name}`}><td className="child-cell">{child.name}</td><td>{formatMaybeNumber(child.entrances)}</td><td>{formatMaybeRate(child.entranceShare)}</td><td>{formatMaybeMoney(child.gmv)}</td><td>{formatMaybeRate(child.gmvShare)}</td><td>{formatMaybeMoney(child.gmvPerThousandViews)}</td></tr>)),
+              <tr key={source.type} className="group-row"><td>{source.type}</td><td data-label="进房人次">{formatMaybeNumber(source.entrances)}</td><td data-label="占比">{formatMaybeRate(source.entranceShare)}</td><td data-label="成交金额">{formatMaybeMoney(source.gmv)}</td><td data-label="成交占比">{formatMaybeRate(source.gmvShare)}</td><td data-label="千次观看成交金额">{formatMaybeMoney(source.gmvPerThousandViews)}</td></tr>,
+              ...((source.children || []).map((child) => <tr key={`${source.type}-${child.name}`}><td className="child-cell">{child.name}</td><td data-label="进房人次">{formatMaybeNumber(child.entrances)}</td><td data-label="占比">{formatMaybeRate(child.entranceShare)}</td><td data-label="成交金额">{formatMaybeMoney(child.gmv)}</td><td data-label="成交占比">{formatMaybeRate(child.gmvShare)}</td><td data-label="千次观看成交金额">{formatMaybeMoney(child.gmvPerThousandViews)}</td></tr>)),
             ]) : <tr><td colSpan={6}>暂无流量来源数据</td></tr>}
           </tbody>
         </table>
@@ -747,7 +754,7 @@ function ChannelCharts({ data }: { data: ChannelProfile['data'] }) {
         <table>
           <thead><tr>{['渠道', '预约人数', '预约占比', '预约观看人数', '观看占比', '预约转观看率', '成交金额'].map((head) => <th key={head}>{head}</th>)}</tr></thead>
           <tbody>
-            {reservationChannels.length ? reservationChannels.map((row) => <tr key={row.channel}><td>{row.channel}</td><td>{formatMaybeNumber(row.reservedUsers)}</td><td>{formatMaybeRate(row.reservedShare)}</td><td>{formatMaybeNumber(row.watchedUsers)}</td><td>{formatMaybeRate(row.watchedShare)}</td><td>{formatMaybeRate(row.watchRate)}</td><td>{formatMaybeMoney(row.gmv)}</td></tr>) : <tr><td colSpan={7}>暂无预约渠道数据</td></tr>}
+            {reservationChannels.length ? reservationChannels.map((row) => <tr key={row.channel}><td>{row.channel}</td><td data-label="预约人数">{formatMaybeNumber(row.reservedUsers)}</td><td data-label="预约占比">{formatMaybeRate(row.reservedShare)}</td><td data-label="预约观看人数">{formatMaybeNumber(row.watchedUsers)}</td><td data-label="观看占比">{formatMaybeRate(row.watchedShare)}</td><td data-label="预约转观看率">{formatMaybeRate(row.watchRate)}</td><td data-label="成交金额">{formatMaybeMoney(row.gmv)}</td></tr>) : <tr><td colSpan={7}>暂无预约渠道数据</td></tr>}
           </tbody>
         </table>
       </section>
@@ -815,7 +822,7 @@ function DataTable({ metrics, isAdmin, busy, legacyText, onLegacyText, onImportL
         </section>
       )}
       <section className="panel table">
-        <table><thead><tr>{['直播主题', '观看人数', '平均观看', '关注率', '成交金额', '成交率'].map((h) => <th key={h}>{h}</th>)}</tr></thead><tbody>{metrics.map((row) => <tr key={row.id}><td>{row.topic}</td><td>{formatNumber(row.viewers)}</td><td>{formatSeconds(row.avgWatchSec)}</td><td>{formatPercent(row.followRate)}</td><td>{formatMoney(row.gmv)}</td><td>{formatPercent(row.buyerRate, 2)}</td></tr>)}</tbody></table>
+        <table><thead><tr>{['直播主题', '观看人数', '平均观看', '关注率', '成交金额', '成交率'].map((h) => <th key={h}>{h}</th>)}</tr></thead><tbody>{metrics.map((row) => <tr key={row.id}><td>{row.topic}</td><td data-label="观看人数">{formatNumber(row.viewers)}</td><td data-label="平均观看">{formatSeconds(row.avgWatchSec)}</td><td data-label="关注率">{formatPercent(row.followRate)}</td><td data-label="成交金额">{formatMoney(row.gmv)}</td><td data-label="成交率">{formatPercent(row.buyerRate, 2)}</td></tr>)}</tbody></table>
       </section>
     </div>
   )

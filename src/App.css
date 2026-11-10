@@ -435,6 +435,15 @@ textarea:focus-visible {
   font-size: 16px;
 }
 
+.live-list {
+  display: grid;
+  gap: 8px;
+}
+
+.mobile-live-picker {
+  display: none;
+}
+
 .live {
   width: 100%;
   min-height: 42px;
@@ -781,6 +790,10 @@ textarea:focus-visible {
 
 .channel-kpis .metric {
   min-height: 84px;
+  padding: 12px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .channel-notes {
@@ -1222,6 +1235,37 @@ tbody tr:hover td {
   }
 }
 
+@media (min-width: 721px) and (max-width: 1100px) {
+  .dashboard-main:not(.tab-overview) > .summary-grid,
+  .tab-compare .side,
+  .tab-data .side {
+    display: none;
+  }
+
+  .side {
+    display: block;
+  }
+
+  .side h2,
+  .side .live-list {
+    display: none;
+  }
+
+  .mobile-live-picker {
+    display: grid;
+    gap: 6px;
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  .mobile-live-picker select {
+    width: 100%;
+    min-height: 48px;
+    font-size: 16px;
+  }
+}
+
 @media (max-width: 720px) {
   .panel-head,
   .section-head,
@@ -1362,6 +1406,380 @@ tbody tr:hover td {
     flex: none;
     padding: 0 12px;
     font-size: 13px;
+  }
+}
+
+@media (max-width: 720px) {
+  .topbar {
+    position: static;
+  }
+
+  .actions .button {
+    min-height: 44px;
+    font-size: 13px;
+  }
+
+  .actions .subtle {
+    width: 44px;
+  }
+
+  .tabs {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0;
+    margin-bottom: 16px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--panel);
+  }
+
+  .tabs button {
+    min-width: 0;
+    min-height: 48px;
+    padding: 0 4px;
+    font-size: 14px;
+    line-height: 1.3;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .tabs button:not(:nth-child(3n)) {
+    border-right: 1px solid var(--line);
+  }
+
+  .tabs button:nth-child(-n + 3) {
+    border-bottom-color: var(--line);
+  }
+
+  .tabs button.active {
+    border-bottom-color: var(--green);
+    background: var(--good-bg);
+  }
+
+  .dashboard-main:not(.tab-overview) > .summary-grid,
+  .tab-compare .side,
+  .tab-data .side {
+    display: none;
+  }
+
+  .workspace,
+  .content,
+  .stack {
+    min-width: 0;
+    gap: 12px;
+  }
+
+  .side {
+    display: block;
+    padding: 12px 14px;
+  }
+
+  .side h2,
+  .side .live-list {
+    display: none;
+  }
+
+  .mobile-live-picker {
+    display: grid;
+    gap: 6px;
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  .mobile-live-picker select {
+    width: 100%;
+    min-width: 0;
+    min-height: 48px;
+    color: var(--ink);
+    font-size: 16px;
+  }
+
+  .panel,
+  .empty {
+    min-width: 0;
+    padding: 16px;
+  }
+
+  .panel-head h2,
+  .panel h2 {
+    overflow-wrap: anywhere;
+  }
+
+  .panel-head > .button,
+  .upload-row .button,
+  .migrate-actions .button {
+    width: 100%;
+  }
+
+  .upload-row {
+    gap: 8px;
+    margin-top: 14px;
+  }
+
+  .login-card input,
+  .migrate textarea {
+    min-height: 44px;
+    font-size: 16px;
+  }
+
+  .notice {
+    width: calc(100% - 32px);
+  }
+
+  .bar {
+    min-width: 0;
+    gap: 7px 10px;
+  }
+
+  .bar span {
+    white-space: normal;
+    text-overflow: clip;
+    overflow-wrap: anywhere;
+    font-size: 14px;
+    line-height: 1.4;
+  }
+
+  .bar b,
+  .funnel-row b {
+    font-size: 14px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .fact {
+    min-width: 0;
+    padding: 11px;
+    border: 0;
+    border-bottom: 1px solid var(--line);
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .fact:first-child {
+    grid-column: 1 / -1;
+  }
+
+  .fact span {
+    font-size: 13px;
+  }
+
+  .fact b {
+    overflow-wrap: anywhere;
+    font-size: 15px;
+  }
+
+  .channel-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0;
+  }
+
+  .channel-kpis .metric {
+    min-width: 0;
+    padding: 11px;
+  }
+
+  .channel-kpis .metric:nth-child(odd) {
+    border-right: 1px solid var(--line);
+  }
+
+  .channel-kpis .metric:nth-child(-n + 2) {
+    border-bottom: 1px solid var(--line);
+  }
+
+  .channel-kpis .metric b {
+    font-size: 21px;
+  }
+
+  .batch-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .batch-actions .button {
+    width: 100%;
+    white-space: normal;
+  }
+
+  .batch-list {
+    grid-template-columns: 1fr;
+  }
+
+  .batch-item {
+    min-height: 72px;
+    align-items: center;
+    padding: 10px 0;
+    border: 0;
+    border-bottom: 1px solid var(--line);
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .batch-item.checked {
+    border-color: var(--green);
+    background: transparent;
+  }
+
+  .batch-item b,
+  .batch-item small {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+  }
+
+  .batch-item b {
+    font-size: 15px;
+  }
+
+  .preview {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ai .insight {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .ai .insight small {
+    grid-row: auto;
+    font-size: 13px;
+  }
+
+  .ai p,
+  .rec span,
+  .channel-notes li {
+    font-size: 15px;
+    line-height: 1.6;
+  }
+
+  .ai .insight p,
+  .overview-findings .insight p {
+    font-size: 14px;
+  }
+
+  .table {
+    overflow: visible;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .table table,
+  .channel-table table {
+    display: block;
+    min-width: 0;
+  }
+
+  .table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .table tbody {
+    display: grid;
+    gap: 10px;
+  }
+
+  .table tbody tr {
+    display: block;
+    min-width: 0;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--panel);
+  }
+
+  .table tbody td,
+  .table tbody td:first-child,
+  .table tbody td.child-cell {
+    position: static;
+    display: grid;
+    grid-template-columns: minmax(0, 45%) minmax(0, 1fr);
+    gap: 8px;
+    width: 100%;
+    max-width: none;
+    padding: 7px 0;
+    border-bottom: 1px solid var(--line);
+    background: transparent;
+    text-align: right;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    font-size: 15px;
+  }
+
+  .table tbody td::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-weight: 500;
+    text-align: left;
+  }
+
+  .table tbody td:first-child {
+    display: block;
+    padding: 3px 0 9px;
+    text-align: left;
+    font-size: 15px;
+    font-weight: 700;
+  }
+
+  .table tbody td:first-child::before {
+    content: none;
+  }
+
+  .table tbody td:last-child {
+    border-bottom: 0;
+  }
+
+  .table tbody td[colspan] {
+    display: block;
+    text-align: center;
+  }
+
+  .table tbody tr:hover td,
+  .group-row td {
+    background: transparent;
+  }
+
+  .global-progress {
+    bottom: calc(14px + env(safe-area-inset-bottom));
+    max-height: 42dvh;
+    overflow-y: auto;
+  }
+
+  .global-progress .progress-meta {
+    flex-direction: row;
+  }
+
+  .progress-errors span {
+    overflow: visible;
+    white-space: normal;
+  }
+}
+
+@media (max-width: 359px) {
+  .tabs button {
+    font-size: 13px;
+  }
+
+  .channel-kpis {
+    grid-template-columns: 1fr;
+  }
+
+  .channel-kpis .metric:nth-child(odd) {
+    border-right: 0;
+  }
+
+  .channel-kpis .metric:not(:last-child) {
+    border-bottom: 1px solid var(--line);
   }
 }
 
